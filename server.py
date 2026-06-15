@@ -46,6 +46,8 @@ def build_response(status_line, body_bytes, content_type):
     return headers.encode('utf-8') + body_bytes
 
 while True:
+    query_params = {}
+
     # Accept
     conn, addr = listen_socket.accept()
     print("Connected to ", addr)
@@ -65,10 +67,21 @@ while True:
         else:
             continue
 
-        # Send a response
-        # Clean up the path by removing the leading slash
-        clean_path = path.lstrip('/')
-        if path == '/' or path == '/index.html':
+        # Check for query string
+        if '?' in path:
+            clean_path, query_string = path.lstrip('/').split('?', 1)
+        else:
+            clean_path = path.lstrip('/')
+            query_string = None
+
+        # Populate query parameters dict if present
+        if query_string:
+            query_params = dict(param.split('=') for param in query_string.split('&') if '=' in param)
+        else:
+            query_params = {}
+
+        # Determine the file to serve based on the path
+        if clean_path == '' or clean_path == 'index.html':
             filename = os.path.join("public", "index.html")
         # Browser specific requests for stylesheets, images, etc.
         elif '.' in clean_path:
