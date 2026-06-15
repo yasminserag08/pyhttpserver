@@ -23,7 +23,7 @@ def build_response(status_line, body):
     body_bytes = body.encode('utf-8')
     headers = (
         f"{status_line}\r\n"
-        f"Content-Type: text/plain\r\n"
+        f"Content-Type: text/html\r\n"
         f"Content-Length: {len(body_bytes)}\r\n"
         f"\r\n"
     )
@@ -48,14 +48,19 @@ while True:
         continue
 
     # Send a response
-    if path == '/':
-        response = build_response("HTTP/1.1 200 OK", "Welcome!")
-    elif path == '/about':
-        response = build_response("HTTP/1.1 200 OK", "About Page")
-    elif path == '/hello':
-        response = build_response("HTTP/1.1 200 OK", "Hello, World!")
+    if path == '/' or path == '/index.html':
+        with open("public/index.html", "r") as file:
+            body = file.read()
+        response = build_response("HTTP/1.1 200 OK", body)
     else:
-        response = build_response("HTTP/1.1 404 Not Found", "Page Not Found")
+        try:
+            with open(f"public{path}.html", "r") as file:
+                body = file.read()
+            response = build_response("HTTP/1.1 200 OK", body)
+        except FileNotFoundError:
+            with open("public/404.html", "r") as file:
+                body = file.read()
+            response = build_response("HTTP/1.1 404 Not Found", body)
 
     conn.sendall(response)
     conn.close()
