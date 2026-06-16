@@ -44,12 +44,16 @@ def parse_request(conn):
             headers_dict[key.strip().lower()] = value.strip()
 
     body_bytes = raw_body.encode('utf-8')
+    
     # Pass 2 (make sure entire body is scanned)
     content_length = int(headers_dict.get('content-length', 0))    
     while len(body_bytes) < content_length:
         remaining_length = content_length - len(body_bytes)
         chunk = conn.recv(min(remaining_length, 4096))
         body_bytes += chunk
+
+    body_bytes = body_bytes[:content_length]  # Slice body_bytes to match exactly what the headers claimed
+
     request = HTTPRequest(method, path, headers_dict, body_bytes)
     print(f"Path: {request.path}")
     print(f"Method: {request.method}")
