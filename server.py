@@ -44,7 +44,6 @@ def parse_request(conn):
             headers_dict[key.strip().lower()] = value.strip()
 
     body_bytes = raw_body.encode('utf-8')
-    
     # Pass 2 (make sure entire body is scanned)
     content_length = int(headers_dict.get('content-length', 0))    
     while len(body_bytes) < content_length:
@@ -53,7 +52,7 @@ def parse_request(conn):
         body_bytes += chunk
 
     body_bytes = body_bytes[:content_length]  # Slice body_bytes to match exactly what the headers claimed
-
+    
     request = HTTPRequest(method, path, headers_dict, body_bytes)
     print(f"Path: {request.path}")
     print(f"Method: {request.method}")
@@ -69,32 +68,50 @@ while True:
     print("Connected to ", addr)
 
     try: 
-        request = parse_request(conn)
-        if not request:
-            continue
-
-        if request.path == '' or request.path == 'index.html':
-            filename = os.path.join("public", "index.html")
-        elif '.' in request.path: # eg .png, .css, etc
-            filename = os.path.join("public", request.path)
-        else:
-            filename = os.path.join("public", f"{request.path}.html")
-            
         try:
-            with open(filename, 'rb') as f:
-                body_bytes = f.read()
-                
-            _, ext = os.path.splitext(filename)
-            content_type = MIME_TYPES.get(ext, 'text/plain')
-            status_code = 200
-            status_text = "OK"            
-        except FileNotFoundError:
-            with open("public/404.html", 'rb') as f:
-                body_bytes = f.read() 
-                status_code = 404
-                status_text = "Not Found"   
-                content_type = "text/html"
+            request = parse_request(conn)
+            if not request:
+                continue
+        except Exception as parse_error:
+            print("Error parsing request: ", parse_error)
+            status_code = 400
+            status_text = "Bad Request"
+            content_type = "text/html"
+            body_bytes=b"<h1>400 Bad Request</h1><p>Your browser sent a request this server could not understand.</p>"
+            request = None
 
+        if request:
+            if request.path == '' or request.path == 'index.html':
+                filename = os.path.join("public", "index.html")
+            elif '.' in request.path: # eg .png, .css, etc
+                filename = os.path.join("public", request.path)
+            else:
+                filename = os.path.join("public", f"{request.path}.html")
+            
+            try:
+                with open(filename, 'rb') as f:
+                    body_bytes = f.read()
+                    
+                _, ext = os.path.splitext(filename)
+                content_type = MIME_TYPES.get(ext, 'text/plain')
+                status_code = 200
+                status_text = "OK"            
+            except FileNotFoundError:
+                with open("public/404.html", 'rb') as f:
+                    body_bytes = f.read() 
+                    status_code = 404
+                    status_text = "Not Found"   
+                    content_type = "text/html"
+
+
+    except Exception as e:
+        print("Error handling request: ", e)
+        status_code = 500
+        status_text = "Internal Server Error"
+        content_type = "text/html"
+        body_bytes=b"<h1>500 Internal Server Error</h1><p>The server encountered an internal error.</p>"   
+
+    try: 
         response = HTTPResponse(
             status_code=status_code,
             status_text=status_text,
@@ -103,7 +120,8 @@ while True:
         ).serialize()
 
         conn.sendall(response)
-    except Exception as e:
-        print("Error handling request: ", e)
+    except Exception as send_error:
+        print("Error sending response: ", send_error)
+ 
     finally:
         conn.close()
