@@ -1,6 +1,7 @@
 import socket
 import os
 from request import HTTPRequest
+from response import HTTPResponse
 
 MIME_TYPES = {
     '.html': 'text/html',
@@ -30,7 +31,9 @@ def parse_request(conn):
     if not initial_request: 
         return None 
     
-    raw_headers, raw_body = initial_request.split("\r\n\r\n")
+    parts = initial_request.split("\r\n\r\n", 1)
+    raw_headers = parts[0]
+    raw_body = parts[1] if len(parts) > 1 else ""
     lines = raw_headers.splitlines()
     method, path, _ = lines[0].split(' ')
     
@@ -56,17 +59,6 @@ def parse_request(conn):
     print(f"Body bytes: {request.body_bytes}")
     return request
 
-
-# Helper function to build HTTP responses
-def build_response(status_line, body_bytes, content_type):
-    headers = (
-        f"{status_line}\r\n"
-        f"Content-Type: {content_type}\r\n"
-        f"Content-Length: {len(body_bytes)}\r\n"
-        f"\r\n"
-    )
-    return headers.encode('utf-8') + body_bytes
-
 while True:
     # Accept
     conn, addr = listen_socket.accept()
@@ -90,14 +82,22 @@ while True:
                 
             _, ext = os.path.splitext(filename)
             content_type = MIME_TYPES.get(ext, 'text/plain')
-            
-            response = build_response("HTTP/1.1 200 OK", body_bytes, content_type)
-            
+            status_code = 200
+            status_text = "OK"            
         except FileNotFoundError:
             with open("public/404.html", 'rb') as f:
                 body_bytes = f.read() 
-            response = build_response("HTTP/1.1 404 Not Found", body_bytes, "text/html")
-            
+                status_code = 404
+                status_text = "Not Found"   
+                content_type = "text/html"
+
+        response = HTTPResponse(
+            status_code=status_code,
+            status_text=status_text,
+            content_type=content_type,
+            body=body_bytes
+        ).serialize()
+
         conn.sendall(response)
     except Exception as e:
         print("Error handling request: ", e)
