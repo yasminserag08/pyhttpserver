@@ -2,13 +2,29 @@ import urllib.parse
 
 class HTTPRequest:
     def __init__(self, method, raw_path, headers, body_bytes):
-        self.method = method
-        self.raw_path = raw_path      
-        self.headers = headers       
-        self.body_bytes = body_bytes   # raw payload bytes, can be empty (if GET request for example)
+        self._method = method
+        self._raw_path = raw_path      
+        self._headers = headers       
+        self._body_bytes = body_bytes   # raw payload bytes, can be empty (if GET request for example)
         
         # Parse query params immediately on object creation
         self._raw_query_dict = self._parse_query_string_raw()
+
+    @property
+    def method(self):
+        return self._method
+
+    @property
+    def raw_path(self):
+        return self._raw_path
+
+    @property
+    def headers(self):
+        return self._headers
+
+    @property
+    def body_bytes(self):
+        return self._body_bytes
 
     @property
     def path(self):
@@ -37,3 +53,5 @@ class HTTPRequest:
     def getlist(self, key):
         # Explicitly fetches all values for a key as a list
         return self._raw_query_dict.get(key, [])
+        
+    

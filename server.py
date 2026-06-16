@@ -1,5 +1,6 @@
 import socket
 import os
+from request import HTTPRequest
 
 MIME_TYPES = {
     '.html': 'text/html',
@@ -22,18 +23,39 @@ listen_socket.bind((HOST, PORT))
 listen_socket.listen()
 
 # Helper function to parse HTTP requests
-def parse_request(request):
-    try:
-        request_text = request.decode('utf-8')
-        request_lines = request_text.splitlines()
-        if not request_lines:
-            return None, None, None
-        parts = request_lines[0].split(' ')
-        if len(parts) == 3:
-            method, path, version = parts
-            return method, path, version
-    except Exception:
-        return None, None, None
+def parse_request(conn):
+    # Pass 1
+    initial_request = conn.recv(1024).decode('utf-8')
+
+    if not initial_request: 
+        return None 
+    
+    raw_headers, raw_body = initial_request.split("\r\n\r\n")
+    lines = raw_headers.splitlines()
+    method, path, _ = lines[0].split(' ')
+    
+    headers_dict = {}
+    for line in lines[1:]:
+        if ":" in line:
+            key, value = line.split(":", 1)
+            headers_dict[key.strip().lower()] = value.strip()
+
+    body_bytes = raw_body.encode('utf-8')
+    # Pass 2 (make sure entire body is scanned)
+    content_length = int(headers_dict.get('content-length', 0))    
+    while len(body_bytes) < content_length:
+        remaining_length = content_length - len(body_bytes)
+        chunk = conn.recv(min(remaining_length, 4096))
+        body_bytes += chunk
+    request = HTTPRequest(method, path, headers_dict, body_bytes)
+    print(f"Path: {request.path}")
+    print(f"Method: {request.method}")
+    print(f"Headers: {request.headers}")
+    print(f"Body length: {len(request.body_bytes)}")
+    print(f"Query params: {request.query_params}")
+    print(f"Body bytes: {request.body_bytes}")
+    return request
+
 
 # Helper function to build HTTP responses
 def build_response(status_line, body_bytes, content_type):
@@ -46,59 +68,36 @@ def build_response(status_line, body_bytes, content_type):
     return headers.encode('utf-8') + body_bytes
 
 while True:
-    query_params = {}
-
     # Accept
     conn, addr = listen_socket.accept()
     print("Connected to ", addr)
-    
-    try:
-        # Read some data
-        request = conn.recv(1024)
 
-        # Get the method, path, and version from the first line of the request
-        if request:
-            method, path, version = parse_request(request)
-            if not method or not path or not version:
-                continue
-            print("Method: ", method)
-            print("Route: ", path)
-            print("Version: ", version)
-        else:
+    try: 
+        request = parse_request(conn)
+        if not request:
             continue
 
-        # Check for query string
-        if '?' in path:
-            clean_path, query_string = path.lstrip('/').split('?', 1)
-        else:
-            clean_path = path.lstrip('/')
-            query_string = None
-
-        # Populate query parameters dict if present
-        if query_string:
-            query_params = dict(param.split('=') for param in query_string.split('&') if '=' in param)
-        else:
-            query_params = {}
-
-        # Determine the file to serve based on the path
-        if clean_path == '' or clean_path == 'index.html':
+        if request.path == '' or request.path == 'index.html':
             filename = os.path.join("public", "index.html")
-        # Browser specific requests for stylesheets, images, etc.
-        elif '.' in clean_path:
-            filename = os.path.join("public", clean_path)
-        # For other paths, try to serve an HTML file with the same name
+        elif '.' in request.path: # eg .png, .css, etc
+            filename = os.path.join("public", request.path)
         else:
-            filename = os.path.join("public", f"{clean_path}.html")
+            filename = os.path.join("public", f"{request.path}.html")
+            
         try:
             with open(filename, 'rb') as f:
                 body_bytes = f.read()
-            _, ext = os.path.splitext(filename) # extract file extension
-            content_type = MIME_TYPES.get(ext, 'text/plain') # default to text/plain if unknown
+                
+            _, ext = os.path.splitext(filename)
+            content_type = MIME_TYPES.get(ext, 'text/plain')
+            
             response = build_response("HTTP/1.1 200 OK", body_bytes, content_type)
+            
         except FileNotFoundError:
             with open("public/404.html", 'rb') as f:
                 body_bytes = f.read() 
             response = build_response("HTTP/1.1 404 Not Found", body_bytes, "text/html")
+            
         conn.sendall(response)
     except Exception as e:
         print("Error handling request: ", e)
