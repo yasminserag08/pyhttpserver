@@ -1,5 +1,6 @@
 import socket 
 import io
+import os
 import sys
 from request import HTTPRequest
 
@@ -124,28 +125,28 @@ class HTTPServer:
         return response
 
 if __name__ == "__main__":
-    # Get callable name from command line
-    if len(sys.argv) < 2:
-        print("Usage: python3 server.py <app_name>")
-        print("Example: python3 server.py basic_wsgi")
-        sys.exit(1)
+    current_dir = os.path.dirname(os.path.abspath(__file__))
 
-    target_app_name = sys.argv[1]
+    # Tell Python it's allowed to look for modules directly inside the root folder
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
     
-    # Import from the apps folder
-    try:
-        module_path = f"apps.{target_app_name}"
-        imported_module = __import__(module_path, fromlist=['app'])
-        
-        wsgi_callable = getattr(imported_module, 'app')
-        
-    except ModuleNotFoundError:
-        print(f"Error: Could not find application module named 'apps/{target_app_name}.py'")
-        sys.exit(1)
-    except AttributeError:
-        print(f"Error: The module 'apps/{target_app_name}.py' does not expose a global 'app' callable attribute.")
+    # Get callable from command line
+    if len(sys.argv) < 2:
+        print("Usage: python3 server.py <module_name>:<variable_name>")
         sys.exit(1)
 
+    app_path = sys.argv[1]
+
+    if ":" in app_path:
+        module_name, variable_name = app_path.split(":", 1)
+    else:
+        module_name = f"apps.{app_path}"
+        variable_name = "app"
+
+    # dynamically import whatever was requested
+    imported_module = __import__(module_name, fromlist=[variable_name])
+    wsgi_callable = getattr(imported_module, variable_name)
 
     server = HTTPServer(host='', port=8888, app=wsgi_callable)
     server.serve_forever()
