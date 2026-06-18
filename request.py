@@ -28,9 +28,8 @@ class HTTPRequest:
 
     @property
     def path(self):
-        # Returns a clean routing path stripped of slashes and query parameters
         base_path = self.raw_path.split('?')[0]
-        return base_path.strip('/')
+        return base_path
 
     def _parse_query_string_raw(self):
         # Extracts query parameters from the raw_path

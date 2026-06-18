@@ -3,15 +3,6 @@ import io
 import sys
 from request import HTTPRequest
 
-MIME_TYPES = {
-    '.html': 'text/html',
-    '.css': 'text/css',
-    '.png': 'image/png',
-    '.jpg': 'image/jpeg',
-    '.jpeg': 'image/jpeg',
-    '.txt': 'text/plain'
-}
-
 class HTTPServer:
     def __init__(self, host='', port=8888, app=None):
         self.host = host
@@ -52,9 +43,9 @@ class HTTPServer:
             response_status = ['500 INTERNAL SERVER ERROR']
             response_headers = [('Content-Type', 'text/plain')]
             result = [b'Internal Server Error: The application crashed.'] 
-            response = self.finish_response(result, response_status, response_headers)
-            conn.sendall(response)
-            conn.close()
+        response = self.finish_response(result, response_status, response_headers)
+        conn.sendall(response)
+        conn.close()
 
     # Helper function to parse HTTP requests
     def parse_request(self, conn):
@@ -132,12 +123,29 @@ class HTTPServer:
         response = response.encode('utf-8') + body
         return response
 
-# A wsgi application that returns "Hello world!" to test
-def app(environ, start_response):
-    start_response('200 OK', [('Content-Type', 'text/plain')])
-    return [b'Hello world!']
-
 if __name__ == "__main__":
-    server = HTTPServer('', 8888, app)
-    print(f"Serving HTTP on port {server.port}...")
+    # Get callable name from command line
+    if len(sys.argv) < 2:
+        print("Usage: python3 server.py <app_name>")
+        print("Example: python3 server.py basic_wsgi")
+        sys.exit(1)
+
+    target_app_name = sys.argv[1]
+    
+    # Import from the apps folder
+    try:
+        module_path = f"apps.{target_app_name}"
+        imported_module = __import__(module_path, fromlist=['app'])
+        
+        wsgi_callable = getattr(imported_module, 'app')
+        
+    except ModuleNotFoundError:
+        print(f"Error: Could not find application module named 'apps/{target_app_name}.py'")
+        sys.exit(1)
+    except AttributeError:
+        print(f"Error: The module 'apps/{target_app_name}.py' does not expose a global 'app' callable attribute.")
+        sys.exit(1)
+
+
+    server = HTTPServer(host='', port=8888, app=wsgi_callable)
     server.serve_forever()
