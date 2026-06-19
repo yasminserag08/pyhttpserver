@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import threading
+from concurrent.futures import ThreadPoolExecutor
 from common.request import HTTPRequest
 
 class HTTPServer:
@@ -11,18 +12,16 @@ class HTTPServer:
         self.host = host
         self.port = port
         self.app = app
+        self.pool = ThreadPoolExecutor(max_workers=5)
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listen_socket.bind((self.host, self.port))
         self.listen_socket.listen()
 
     def serve_forever(self):
-        i = 0
         while True:
             conn, addr = self.listen_socket.accept()
-            t = threading.Thread(target=self.handle_one_request, args=(conn,), name=f"thread{i}")
-            t.start()
-            i += 1
+            self.pool.submit(self.handle_one_request, conn)
 
     def handle_one_request(self, conn):
         response_status = []
@@ -86,12 +85,6 @@ class HTTPServer:
         body_bytes = body_bytes[:content_length]  # Slice body_bytes to match exactly what the headers claimed
         
         request = HTTPRequest(method, path, headers_dict, body_bytes)
-        print(f"Path: {request.path}")
-        print(f"Method: {request.method}")
-        print(f"Headers: {request.headers}")
-        print(f"Body length: {len(request.body_bytes)}")
-        print(f"Query params: {request.query_params}")
-        print(f"Body bytes: {request.body_bytes}")
         return request
     
     # Build the WSGI environ dictionary from the HTTP request
