@@ -12,7 +12,7 @@ class HTTPServer:
         self.host = host
         self.port = port
         self.app = app
-        self.pool = ThreadPoolExecutor(max_workers=5)
+        self.pool = ThreadPoolExecutor(max_workers=50)
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listen_socket.bind((self.host, self.port))
@@ -51,7 +51,6 @@ class HTTPServer:
             result = [b'Internal Server Error: The application crashed.'] 
         response = self.finish_response(result, response_status, response_headers)
         conn.sendall(response)
-        time.sleep(60)
         conn.close()
 
     # Helper function to parse HTTP requests
