@@ -2,7 +2,8 @@ import socket
 import io
 import os
 import sys
-from request import HTTPRequest
+import time
+from common.request import HTTPRequest
 
 class HTTPServer:
     def __init__(self, host='', port=8888, app=None):
@@ -12,13 +13,14 @@ class HTTPServer:
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listen_socket.bind((self.host, self.port))
-        self.listen_socket.listen()
+        self.listen_socket.listen(1)
 
     def serve_forever(self):
         while True:
             conn, addr = self.listen_socket.accept()
             print("Connected to ", addr)
             self.handle_one_request(conn)
+            conn.close()
 
     def handle_one_request(self, conn):
         response_status = []
@@ -46,7 +48,7 @@ class HTTPServer:
             result = [b'Internal Server Error: The application crashed.'] 
         response = self.finish_response(result, response_status, response_headers)
         conn.sendall(response)
-        conn.close()
+        time.sleep(60)
 
     # Helper function to parse HTTP requests
     def parse_request(self, conn):
