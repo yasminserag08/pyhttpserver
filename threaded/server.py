@@ -3,6 +3,7 @@ import io
 import os
 import sys
 import time
+import threading
 from common.request import HTTPRequest
 
 class HTTPServer:
@@ -16,11 +17,12 @@ class HTTPServer:
         self.listen_socket.listen()
 
     def serve_forever(self):
+        i = 0
         while True:
             conn, addr = self.listen_socket.accept()
-            print("Connected to ", addr)
-            self.handle_one_request(conn)
-            conn.close()
+            t = threading.Thread(target=self.handle_one_request, args=(conn,), name=f"thread{i}")
+            t.start()
+            i += 1
 
     def handle_one_request(self, conn):
         response_status = []
@@ -29,6 +31,8 @@ class HTTPServer:
         def start_response(status, headers, exc_info=None):
             response_status.append(status)
             response_headers.extend(headers)
+
+        print(f"Handling connection in thread: {threading.current_thread().name}")
 
         # Parse the HTTP request
         request = self.parse_request(conn)
@@ -49,6 +53,7 @@ class HTTPServer:
         response = self.finish_response(result, response_status, response_headers)
         conn.sendall(response)
         time.sleep(60)
+        conn.close()
 
     # Helper function to parse HTTP requests
     def parse_request(self, conn):
