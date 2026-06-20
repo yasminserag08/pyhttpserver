@@ -2,7 +2,6 @@ import socket
 import io
 import os
 import sys
-import time
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from common.request import HTTPRequest

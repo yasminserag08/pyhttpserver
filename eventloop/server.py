@@ -1,0 +1,180 @@
+import socket
+import selectors
+from common.request import HTTPRequest
+import io
+import sys
+import os
+
+class HTTPServer:
+    def __init__(self, host='', port=8888, app=None):
+        self.host = host
+        self.port = port
+        self.app = app
+        self.sel = selectors.DefaultSelector() # pick selector based on OS
+        self.client_buffers = {}
+        self.responses = {}
+
+        # Initialize listening socket & register it
+        self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.listen_socket.setblocking(False)
+        self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.listen_socket.bind((self.host, self.port))
+        self.listen_socket.listen()
+        self.sel.register(self.listen_socket, selectors.EVENT_READ, self.accept_connection)
+
+    def serve_forever(self):
+        while True:
+            events = self.sel.select()
+            for key, mask in events:
+                callback = key.data
+                callback(key.fileobj)
+
+    def accept_connection(self, sock):
+        conn, addr = sock.accept()
+        conn.setblocking(False)
+        self.client_buffers[conn] = b'' # initialize buffer
+        self.sel.register(conn, selectors.EVENT_READ, self.handle_read)
+
+    def handle_read(self, conn):
+        # Get buffer of client
+        client_buffer = self.client_buffers[conn] 
+
+        # Read new data coming from socket
+        data = conn.recv(1024)
+        if not data:
+            self.close(conn)
+            return 
+        client_buffer += data
+        self.client_buffers[conn] = client_buffer
+
+        # Check if headers are ready
+        if b"\r\n\r\n" not in client_buffer:
+            return 
+        else:
+            headers, body, method, path = self.parse_request(client_buffer)
+            content_length = int(headers.get('content-length', 0)) # 0 if GET request
+            if content_length > len(body):
+                return # Not ready yet, keep reading
+            request = HTTPRequest(method, path, headers, body)
+            environ = self.build_environ(request)
+            response_status = []
+            response_headers = []
+
+            def start_response(status, headers, exc_info=None):
+                response_status.append(status)
+                response_headers.extend(headers)
+
+            try:
+                # Call the WSGI application 
+                result = self.app(environ, start_response)
+            except Exception as e:
+                print(f"Internal Server Error: {e}", file=sys.stderr)
+                response_status = ['500 INTERNAL SERVER ERROR']
+                response_headers = [('Content-Type', 'text/plain')]
+                result = [b'Internal Server Error: The application crashed.'] 
+            response = self.finish_response(result, response_status, response_headers)
+            self.responses[conn] = response
+            self.client_buffers.pop(conn, None)
+            self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write)   
+
+    def handle_write(self, conn):
+        response_bytes = self.responses[conn]
+
+        if not response_bytes: 
+            self.close(conn)
+
+        else:
+            sent = conn.send(response_bytes)
+            self.responses[conn] = self.responses[conn][sent:]
+            if self.responses[conn]  == b'':
+                self.close(conn)
+
+    def parse_request(self, buf):
+        # separate body from headers
+        parts = buf.split(b"\r\n\r\n", 1)
+        raw_headers = parts[0].decode('utf-8')
+        raw_body = parts[1] if len(parts) > 1 else b""
+        lines = raw_headers.splitlines()
+
+        # separate path from method
+        method, path, _ = lines[0].split(' ')
+        
+        # convert headers to dict
+        headers_dict = {}
+        for line in lines[1:]:
+            if ":" in line:
+                key, value = line.split(":", 1)
+                headers_dict[key.strip().lower()] = value.strip()
+
+        return headers_dict, raw_body, method, path    
+    
+    # Build the WSGI environ dictionary from the HTTP request
+    def build_environ(self, request):
+        environ = {
+            'REQUEST_METHOD': request.method,
+            'PATH_INFO': request.path,
+            'QUERY_STRING': '&'.join(f'{k}={v}' for k, v in request.query_params.items()),
+            'CONTENT_TYPE': request.headers.get('content-type', ''),
+            'CONTENT_LENGTH': request.headers.get('content-length', ''),
+            'SERVER_NAME': self.host or 'localhost',
+            'SERVER_PORT': str(self.port),
+            'SERVER_PROTOCOL': 'HTTP/1.1',
+            'wsgi.input': io.BytesIO(request.body_bytes),
+            'wsgi.errors': sys.stderr,
+            'wsgi.multithread': False,
+            'wsgi.multiprocess': False,
+            'wsgi.run_once': False,
+            'wsgi.url_scheme': 'http',
+        }
+
+        for key, value in request.headers.items():
+            key = 'HTTP_' + key.upper().replace('-', '_')
+            environ[key] = value
+
+        return environ    
+
+    def finish_response(self, result, response_status, response_headers):
+        status = response_status[0]
+        body = b''.join(result)
+        if hasattr(result, 'close'): result.close()
+        response = f'HTTP/1.1 {status}\r\n'
+        for header in response_headers:
+            response += '{0}: {1}\r\n'.format(*header)
+        response += '\r\n'
+        response = response.encode('utf-8') + body
+        return response
+    
+
+    def close(self, conn):
+        self.sel.unregister(conn)
+        self.responses.pop(conn, None)
+        self.client_buffers.pop(conn, None)
+        conn.close()
+
+
+if __name__ == "__main__":
+    current_dir = os.path.dirname(os.path.abspath(__file__))
+
+    # Tell Python it's allowed to look for modules directly inside the root folder
+    if current_dir not in sys.path:
+        sys.path.insert(0, current_dir)
+    
+    # Get callable from command line
+    if len(sys.argv) < 2:
+        print("Usage: python3 server.py <module_name>:<variable_name>")
+        sys.exit(1)
+
+    app_path = sys.argv[1]
+
+    if ":" in app_path:
+        module_name, variable_name = app_path.split(":", 1)
+    else:
+        module_name = f"apps.{app_path}"
+        variable_name = "app"
+
+    # dynamically import whatever was requested
+    imported_module = __import__(module_name, fromlist=[variable_name])
+    wsgi_callable = getattr(imported_module, variable_name)
+
+    server = HTTPServer(host='', port=8888, app=wsgi_callable)
+    server.serve_forever()
