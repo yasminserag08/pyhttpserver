@@ -13,6 +13,7 @@ class HTTPServer:
         self.sel = selectors.DefaultSelector() # pick selector based on OS
         self.client_buffers = {}
         self.responses = {}
+        self.parsed_requests = {}
 
         # Initialize listening socket & register it
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -33,6 +34,7 @@ class HTTPServer:
         conn, addr = sock.accept()
         conn.setblocking(False)
         self.client_buffers[conn] = b'' # initialize buffer
+        self.parsed_requests[conn] = None
         self.sel.register(conn, selectors.EVENT_READ, self.handle_read)
 
     def handle_read(self, conn):
@@ -47,35 +49,45 @@ class HTTPServer:
         client_buffer += data
         self.client_buffers[conn] = client_buffer
 
-        # Check if headers are ready
-        if b"\r\n\r\n" not in client_buffer:
-            return 
-        else:
-            headers, body, method, path = self.parse_request(client_buffer)
-            content_length = int(headers.get('content-length', 0)) # 0 if GET request
-            if content_length > len(body):
-                return # Not ready yet, keep reading
-            request = HTTPRequest(method, path, headers, body)
-            environ = self.build_environ(request)
-            response_status = []
-            response_headers = []
+        if self.parsed_requests[conn] is None:
+            # Check if headers are ready
+            if b"\r\n\r\n" not in client_buffer:
+                return 
+            headers, method, path = self.parse_request(client_buffer)
+            header_end = client_buffer.index(b"\r\n\r\n") + 4
+            self.parsed_requests[conn] = (headers, method, path, header_end)
 
-            def start_response(status, headers, exc_info=None):
-                response_status.append(status)
-                response_headers.extend(headers)
+        headers, method, path, header_end = self.parsed_requests[conn]
+        content_length = int(headers.get('content-length', 0))
+        body = client_buffer[header_end:]
 
-            try:
-                # Call the WSGI application 
-                result = self.app(environ, start_response)
-            except Exception as e:
-                print(f"Internal Server Error: {e}", file=sys.stderr)
-                response_status = ['500 INTERNAL SERVER ERROR']
-                response_headers = [('Content-Type', 'text/plain')]
-                result = [b'Internal Server Error: The application crashed.'] 
-            response = self.finish_response(result, response_status, response_headers)
-            self.responses[conn] = response
-            self.client_buffers.pop(conn, None)
-            self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write)   
+        if content_length > len(body):
+            return  # body still incomplete, just wait for more data
+
+        body = body[:content_length]  # trim any extra bytes past this request
+        request = HTTPRequest(method, path, headers, body)
+
+        environ = self.build_environ(request)
+        response_status = []
+        response_headers = []
+
+        def start_response(status, headers, exc_info=None):
+            response_status.append(status)
+            response_headers.extend(headers)
+
+        try:
+            # Call the WSGI application 
+            result = self.app(environ, start_response)
+        except Exception as e:
+            print(f"Internal Server Error: {e}", file=sys.stderr)
+            response_status = ['500 INTERNAL SERVER ERROR']
+            response_headers = [('Content-Type', 'text/plain')]
+            result = [b'Internal Server Error: The application crashed.'] 
+        response = self.finish_response(result, response_status, response_headers)
+        self.responses[conn] = response
+        self.parsed_requests.pop(conn, None)
+        self.client_buffers.pop(conn, None)
+        self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write)
 
     def handle_write(self, conn):
         response_bytes = self.responses[conn]
@@ -89,24 +101,19 @@ class HTTPServer:
             if self.responses[conn]  == b'':
                 self.close(conn)
 
+    # Helper method to parse HTTP requests
     def parse_request(self, buf):
-        # separate body from headers
         parts = buf.split(b"\r\n\r\n", 1)
         raw_headers = parts[0].decode('utf-8')
-        raw_body = parts[1] if len(parts) > 1 else b""
         lines = raw_headers.splitlines()
-
-        # separate path from method
         method, path, _ = lines[0].split(' ')
-        
-        # convert headers to dict
         headers_dict = {}
         for line in lines[1:]:
             if ":" in line:
                 key, value = line.split(":", 1)
                 headers_dict[key.strip().lower()] = value.strip()
-
-        return headers_dict, raw_body, method, path    
+        return headers_dict, method, path
+  
     
     # Build the WSGI environ dictionary from the HTTP request
     def build_environ(self, request):
@@ -149,6 +156,7 @@ class HTTPServer:
         self.sel.unregister(conn)
         self.responses.pop(conn, None)
         self.client_buffers.pop(conn, None)
+        self.parsed_requests.pop(conn, None)
         conn.close()
 
 
