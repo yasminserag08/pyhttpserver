@@ -48,7 +48,6 @@ class HTTPServer:
             result = [b'Internal Server Error: The application crashed.'] 
         response = self.finish_response(result, response_status, response_headers)
         conn.sendall(response)
-        time.sleep(60)
 
     # Helper function to parse HTTP requests
     def parse_request(self, conn):
