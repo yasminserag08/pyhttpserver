@@ -55,14 +55,14 @@ class HTTPServer:
     # Helper function to parse HTTP requests
     def parse_request(self, conn):
         # Pass 1
-        initial_request = conn.recv(1024).decode('utf-8')
+        initial_request = conn.recv(1024)
 
         if not initial_request: 
             return None 
         
-        parts = initial_request.split("\r\n\r\n", 1)
-        raw_headers = parts[0]
-        raw_body = parts[1] if len(parts) > 1 else ""
+        parts = initial_request.split(b"\r\n\r\n", 1)
+        raw_headers = parts[0].decode('utf-8')
+        body_bytes = parts[1] if len(parts) > 1 else b""
         lines = raw_headers.splitlines()
         method, path, _ = lines[0].split(' ')
         
@@ -72,7 +72,6 @@ class HTTPServer:
                 key, value = line.split(":", 1)
                 headers_dict[key.strip().lower()] = value.strip()
 
-        body_bytes = raw_body.encode('utf-8')
         # Pass 2 (make sure entire body is scanned)
         content_length = int(headers_dict.get('content-length', 0))    
         while len(body_bytes) < content_length:
