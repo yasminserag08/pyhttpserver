@@ -100,7 +100,7 @@ class HTTPServer:
             'SERVER_PROTOCOL': 'HTTP/1.1',
             'wsgi.input': io.BytesIO(request.body_bytes),
             'wsgi.errors': sys.stderr,
-            'wsgi.multithread': True,
+            'wsgi.multithread': False,
             'wsgi.multiprocess': False,
             'wsgi.run_once': False,
             'wsgi.url_scheme': 'http',
