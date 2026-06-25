@@ -23,47 +23,67 @@ class HTTPServer:
             self.pool.submit(self.handle_one_request, conn)
 
     def handle_one_request(self, conn):
-        response_status = []
-        response_headers = []
-
-        def start_response(status, headers, exc_info=None):
-            response_status.append(status)
-            response_headers.extend(headers)
-
-        print(f"Handling connection in thread: {threading.current_thread().name}")
-
+        connection_buffer = b""
+        conn.settimeout(15.0)
+        while True:
         # Parse the HTTP request
-        request = self.parse_request(conn)
-        if not request:
-            return None
+            try:
+                result = self.parse_request(conn, connection_buffer)
+            except socket.timeout:
+                print(f"Connection timed out for thread: {threading.current_thread().name}")
+                break
+            if not result:
+                break
         
-        # Build the WSGI environ
-        environ = self.build_environ(request)
+            request, connection_buffer = result
 
-        try:
-            # Call the WSGI application 
-            result = self.app(environ, start_response)
-        except Exception as e:
-            print(f"Internal Server Error: {e}", file=sys.stderr)
-            response_status = ['500 INTERNAL SERVER ERROR']
-            response_headers = [('Content-Type', 'text/plain')]
-            result = [b'Internal Server Error: The application crashed.'] 
-        response = self.finish_response(result, response_status, response_headers)
-        conn.sendall(response)
+            # keep-alive by default
+            conn_header = request.headers.get('connection', '').lower()
+            keep_alive = (conn_header != 'close')
+
+            response_status = []
+            response_headers = []
+
+            def start_response(status, headers, exc_info=None):
+                response_status.append(status)
+                response_headers.extend(headers)
+
+            print(f"Handling connection in thread: {threading.current_thread().name}")
+            
+            # Build the WSGI environ
+            environ = self.build_environ(request)
+
+            try:
+                # Call the WSGI application 
+                wsgi_result = self.app(environ, start_response)
+            except Exception as e:
+                print(f"Internal Server Error: {e}", file=sys.stderr)
+                response_status = ['500 INTERNAL SERVER ERROR']
+                response_headers = [('Content-Type', 'text/plain')]
+                wsgi_result = [b'Internal Server Error: The application crashed.'] 
+            response = self.finish_response(wsgi_result, response_status, response_headers, keep_alive)
+            conn.sendall(response)
+            if not keep_alive:
+                conn.close()
+                return 
         conn.close()
 
     # Helper function to parse HTTP requests
-    def parse_request(self, conn):
-        # Pass 1
-        initial_request = conn.recv(1024)
-
-        if not initial_request: 
-            return None 
+    def parse_request(self, conn, connection_buffer):
+        while b"\r\n\r\n" not in connection_buffer:
+            chunk = conn.recv(1024)
+            if not chunk: 
+                return None  # client closed connection 
+            connection_buffer += chunk
         
-        parts = initial_request.split(b"\r\n\r\n", 1)
+        parts = connection_buffer.split(b"\r\n\r\n", 1)
         raw_headers = parts[0].decode('utf-8')
         body_bytes = parts[1] if len(parts) > 1 else b""
+        
         lines = raw_headers.splitlines()
+        if not lines or not lines[0]:
+            return None
+            
         method, path, _ = lines[0].split(' ')
         
         headers_dict = {}
@@ -72,17 +92,25 @@ class HTTPServer:
                 key, value = line.split(":", 1)
                 headers_dict[key.strip().lower()] = value.strip()
 
-        # Pass 2 (make sure entire body is scanned)
         content_length = int(headers_dict.get('content-length', 0))    
+        
+        # Keep fetching data until body is done
         while len(body_bytes) < content_length:
             remaining_length = content_length - len(body_bytes)
             chunk = conn.recv(min(remaining_length, 4096))
+            if not chunk:
+                return None
             body_bytes += chunk
 
-        body_bytes = body_bytes[:content_length]  # Slice body_bytes to match exactly what the headers claimed
+        # Slice off to match content_length
+        actual_body = body_bytes[:content_length]
         
-        request = HTTPRequest(method, path, headers_dict, body_bytes)
-        return request
+        # keep leftover data (in case of 2 requests in a row)
+        leftover_buffer = body_bytes[content_length:]
+        
+        request = HTTPRequest(method, path, headers_dict, actual_body)
+        return request, leftover_buffer
+
     
     # Build the WSGI environ dictionary from the HTTP request
     def build_environ(self, request):
@@ -111,10 +139,25 @@ class HTTPServer:
     
         
     # Helper function to finish the WSGI response
-    def finish_response(self, result, response_status, response_headers):
+    def finish_response(self, result, response_status, response_headers, keep_alive):
         status = response_status[0]
         body = b''.join(result)
+        body_len = len(body)
         response = f'HTTP/1.1 {status}\r\n'
+
+        # Check if Content-Length & Connection were already returned by wsgi app
+        has_content_length = any(h[0].lower() == 'content-length' for h in response_headers)
+        has_connection = any(h[0].lower() == 'connection' for h in response_headers)
+        
+        if not has_content_length:
+            response += f"Content-Length: {body_len}\r\n"
+            
+        if not has_connection:
+            if keep_alive:
+                response += f"Connection: keep-alive\r\n"
+            else:
+                response += f"Connection: close\r\n"
+
         for header in response_headers:
             response += '{0}: {1}\r\n'.format(*header)
         response += '\r\n'

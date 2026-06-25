@@ -22,10 +22,16 @@ class HTTPServer:
             self.handle_one_request(conn)
 
     def handle_one_request(self, conn):
+        conn.settimeout(15.0)
         connection_buffer = b""
         while True:
             # Parse the HTTP request
-            result = self.parse_request(conn, connection_buffer)
+            try:
+                result = self.parse_request(conn, connection_buffer)
+            except socket.timeout:
+                print(f"Connection timed out")
+                break
+
             if not result:
                 break
 
