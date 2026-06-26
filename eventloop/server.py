@@ -53,61 +53,30 @@ class HTTPServer:
         self.last_active[conn] = time.time()
         self.sel.register(conn, selectors.EVENT_READ, self.handle_read)
 
-    def handle_read(self, conn):
-        self.last_active[conn] = time.time()
-        # Get buffer of client
+    def try_process(self, conn):
         client_buffer = self.client_buffers[conn]
 
-        needs_data = True
-        
-        if self.parsed_requests[conn] is not None:
-            headers, _, _, header_end = self.parsed_requests[conn]
-            content_length = int(headers.get('content-length', 0))
-            body = client_buffer[header_end:]
-            if len(body) >= content_length:
-                needs_data = False
-                
-        elif b"\r\n\r\n" in client_buffer:
-            needs_data = False
-
-        # Read new data coming from socket
-        if needs_data:
-            try:
-                data = conn.recv(1024)
-                if not data:
-                    self.close(conn)
-                    return 
-                client_buffer += data
-                self.client_buffers[conn] = client_buffer
-            except BlockingIOError:
-                return # buffer empty, wait for next event
-
         if self.parsed_requests[conn] is None:
-            # Check if headers are ready
             if b"\r\n\r\n" not in client_buffer:
-                return 
+                return None # need to recv more data to complete the headers
             headers, method, path = self.parse_request(client_buffer)
             header_end = client_buffer.index(b"\r\n\r\n") + 4
             self.parsed_requests[conn] = (headers, method, path, header_end)
 
         headers, method, path, header_end = self.parsed_requests[conn]
-
-        # Check keep-alive 
-        keep_alive = headers.get('connection')
-        if keep_alive is None or keep_alive == "keep-alive":
-            keep_alive = True
-        else: keep_alive = False
-        self.keep_alive[conn] = keep_alive
-
         content_length = int(headers.get('content-length', 0))
         body = client_buffer[header_end:]
 
         if content_length > len(body):
-            return  # body still incomplete, just wait for more data
+            return None # need to recv more data to complete the body
 
-        body = body[:content_length]  # trim any extra bytes past this request
-        request = HTTPRequest(method, path, headers, body)
+        body = body[:content_length]
+        self.client_buffers[conn] = client_buffer[header_end + content_length:]
+        self.parsed_requests[conn] = None
+        return HTTPRequest(method, path, headers, body)
 
+    # Handles everything related to WSGI
+    def dispatch(self, conn, request):
         environ = self.build_environ(request)
         response_status = []
         response_headers = []
@@ -117,43 +86,56 @@ class HTTPServer:
             response_headers.extend(headers)
 
         try:
-            # Call the WSGI application 
             result = self.app(environ, start_response)
         except Exception as e:
             print(f"Internal Server Error: {e}", file=sys.stderr)
             response_status = ['500 INTERNAL SERVER ERROR']
             response_headers = [('Content-Type', 'text/plain')]
-            result = [b'Internal Server Error: The application crashed.'] 
-        response = self.finish_response(result, response_status, response_headers)
-        self.responses[conn] = response
-        if not keep_alive: # If not keep_alive completely remove the conn's record
-            self.parsed_requests.pop(conn, None)
-            self.client_buffers.pop(conn, None)
-        else:
-            self.parsed_requests[conn] = None # wait for a new request to parse
-            self.client_buffers[conn] = client_buffer[header_end + content_length:] # keep leftovers only
+            result = [b'Internal Server Error: The application crashed.']
+
+        self.responses[conn] = self.finish_response(result, response_status, response_headers)
+
+        keep_alive = request.headers.get('connection')
+        self.keep_alive[conn] = (keep_alive is None or keep_alive == 'keep-alive')
+
         self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write)
+
+    def handle_read(self, conn):
+        self.last_active[conn] = time.time()
+        try:
+            data = conn.recv(1024)
+            if not data:
+                self.close(conn)
+                return
+            self.client_buffers[conn] += data
+        except BlockingIOError:
+            return
+        
+        request = self.try_process(conn)
+        if request is None:
+            return
+        self.dispatch(conn, request)
+
 
     def handle_write(self, conn):
         self.last_active[conn] = time.time()
-        response_bytes = self.responses[conn]
 
-        if response_bytes is None: 
+        while self.responses[conn] != b'':
+            try:
+                sent = conn.send(self.responses[conn])
+                self.responses[conn] = self.responses[conn][sent:]
+            except BlockingIOError:
+                return
+
+        if not self.keep_alive[conn]:
             self.close(conn)
-
         else:
-            sent = conn.send(response_bytes)
-            self.responses[conn] = self.responses[conn][sent:]
-            if self.responses[conn]  == b'':
-                if not self.keep_alive[conn]:
-                    self.close(conn)
-                else:
-                    self.sel.modify(conn, selectors.EVENT_READ, self.handle_read) # listen for new reads
+            self.sel.modify(conn, selectors.EVENT_READ, self.handle_read)
 
-                    # if buffer already contains data immediately trigger read
-                    if len(self.client_buffers[conn]) > 0:
-                        if b"\r\n\r\n" in self.client_buffers[conn]:
-                            self.handle_read(conn)
+            request = self.try_process(conn)                        
+            if request is None:
+                return
+            self.dispatch(conn, request)
 
     # Helper method to parse HTTP requests
     def parse_request(self, buf):
@@ -174,7 +156,7 @@ class HTTPServer:
         environ = {
             'REQUEST_METHOD': request.method,
             'PATH_INFO': request.path,
-            'QUERY_STRING': '&'.join(f'{k}={v}' for k, v in request.query_params.items()),
+            'QUERY_STRING': request.query_string,
             'CONTENT_TYPE': request.headers.get('content-type', ''),
             'CONTENT_LENGTH': request.headers.get('content-length', ''),
             'SERVER_NAME': self.host or 'localhost',
@@ -197,6 +179,8 @@ class HTTPServer:
     def finish_response(self, result, response_status, response_headers):
         status = response_status[0]
         body = b''.join(result)
+        if not any(h[0].lower() == 'content-length' for h in response_headers):
+            response_headers.append(('Content-Length', str(len(body))))
         if hasattr(result, 'close'): result.close()
         response = f'HTTP/1.1 {status}\r\n'
         for header in response_headers:
@@ -207,13 +191,19 @@ class HTTPServer:
     
 
     def close(self, conn):
-        self.sel.unregister(conn)
+        try:
+            self.sel.unregister(conn)
+        except KeyError:
+            pass # Already unregistered
         self.responses.pop(conn, None)
         self.client_buffers.pop(conn, None)
         self.parsed_requests.pop(conn, None)
         self.last_active.pop(conn, None)
         self.keep_alive.pop(conn, None)
-        conn.close()
+        try:
+            conn.close()
+        except OSError: 
+            pass # Already closed at the OS level
 
 
 if __name__ == "__main__":

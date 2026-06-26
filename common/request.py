@@ -48,6 +48,12 @@ class HTTPRequest:
     def query_params(self):
         # Returns a convenient, flat dictionary (first item of a list, since most params won't be multivalued for now)
         return {k: v[0] for k, v in self._raw_query_dict.items()}
+    
+    @property
+    def query_string(self):
+        if '?' not in self._raw_path:
+            return ''
+        return self._raw_path.split('?', 1)[1]
 
     def getlist(self, key):
         # Explicitly fetches all values for a key as a list
