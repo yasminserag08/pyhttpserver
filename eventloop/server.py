@@ -5,9 +5,11 @@ import sys
 import os
 import time
 import signal
+from concurrent.futures import ThreadPoolExecutor
 from common.request import HTTPRequest
 from common.config_loader import load_server_config
 from common.logger import get_logger
+import queue 
 
 class HTTPServer:
     def __init__(self, host='', port=8888, timeout_seconds=15.0, max_read_chunk=1024, app=None):
@@ -31,7 +33,11 @@ class HTTPServer:
         self.parsed_requests = {}
         self.keep_alive = {}
         self.last_active = {} # can't settimeout on non-blocking sockets
-
+        self.peers = {}
+        
+        self.pool = ThreadPoolExecutor(max_workers=50) # for blocking tasks like calling app
+        self.response_queue = queue.Queue()
+        
         # Initialize listening socket & register it
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_socket.setblocking(False)
@@ -48,11 +54,14 @@ class HTTPServer:
     def serve_forever(self):
         while self.running:
             # run house-cleaning regularly
-            events = self.sel.select(timeout=1.0)
+            events = self.sel.select(timeout=0.01)
+            self.clean_timeouts()
                             
             for key, mask in events:
                 callback = key.data
                 callback(key.fileobj)
+
+            self.drain_queue()
 
         self.logger.info("[Shutdown] Closing listening socket to reject new traffic...")
         try:
@@ -78,7 +87,15 @@ class HTTPServer:
         # Close down the core selector 
         self.sel.close()
         self.logger.info("[Shutdown] Server halted cleanly.")
-        
+
+    def drain_queue(self):
+        while not self.response_queue.empty():
+            conn, response_bytes = self.response_queue.get()
+            if conn not in self.client_buffers:
+                continue  # connection was closed before response was ready
+            self.responses[conn] = response_bytes
+            self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write) 
+
     def clean_timeouts(self):
         now = time.time()
         now = time.time()
@@ -89,17 +106,35 @@ class HTTPServer:
                 timed_out_connections.append(conn)
         
         for conn in timed_out_connections:
-            self.logger.info("Connection timed out and will be closed: %s", conn)
+            peer = self.peers.get(conn, '<unknown>')
+            self.logger.info("Connection timed out and will be closed: %s", peer)
             self.close(conn)
 
+    def run_app(self, environ, conn):
+        response_status = []
+        response_headers = []
+        def start_response(status, headers, exc_info=None):
+            response_status.append(status)
+            response_headers.extend(headers)
+        try:
+            result = self.app(environ, start_response)
+        except Exception as e:
+            self.logger.exception("Internal Server Error")
+            response_status = ['500 INTERNAL SERVER ERROR']
+            response_headers = [('Content-Type', 'text/plain')]
+            result = [b'Internal Server Error: The application crashed.']
+
+        response_bytes = self.finish_response(result, response_status, response_headers)
+        self.response_queue.put((conn, response_bytes))            
 
     def accept_connection(self, sock):
         conn, addr = sock.accept()
-        self.logger.info(f"Accepted connection from {addr}")
+        self.logger.info("Accepted connection from %s", addr)
         conn.setblocking(False)
         self.client_buffers[conn] = b'' # initialize buffer
         self.parsed_requests[conn] = None
         self.last_active[conn] = time.time()
+        self.peers[conn] = addr
         self.sel.register(conn, selectors.EVENT_READ, self.handle_read)
 
     def try_process(self, conn):
@@ -124,43 +159,29 @@ class HTTPServer:
         self.parsed_requests[conn] = None
         return HTTPRequest(method, path, headers, body)
 
-    # Handles everything related to WSGI
     def dispatch(self, conn, request):
-        self.logger.info("Dispatching request %s %s from %s", request.method, request.path, conn.getpeername())
+        peer = self.peers.get(conn, '<unknown>')
+        self.logger.info("Dispatching request %s %s from %s", request.method, request.path, peer)
         environ = self.build_environ(request)
-        response_status = []
-        response_headers = []
-
-        def start_response(status, headers, exc_info=None):
-            response_status.append(status)
-            response_headers.extend(headers)
-
-        try:
-            result = self.app(environ, start_response)
-        except Exception as e:
-            self.logger.exception("Internal Server Error")
-            response_status = ['500 INTERNAL SERVER ERROR']
-            response_headers = [('Content-Type', 'text/plain')]
-            result = [b'Internal Server Error: The application crashed.']
-
-        self.responses[conn] = self.finish_response(result, response_status, response_headers)
-        self.logger.info("Prepared response %s for %s (%d bytes)", response_status[0], conn.getpeername(), len(self.responses[conn]))
-
+        
         keep_alive = request.headers.get('connection')
         self.keep_alive[conn] = (keep_alive is None or keep_alive == 'keep-alive')
 
-        self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write)
+        self.pool.submit(self.run_app, environ, conn)
+
 
     def handle_read(self, conn):
+        peer = self.peers.get(conn, '<unknown>')
         self.last_active[conn] = time.time()
         try:
             data = conn.recv(self.max_read_chunk)
             if not data:
-                self.logger.info("Connection closed by peer %s", conn.getpeername())
+                self.logger.info("Connection closed by peer %s", peer)
                 self.close(conn)
                 return
             self.client_buffers[conn] += data
-        except BlockingIOError:
+        except (BlockingIOError, OSError, ConnectionResetError):
+            self.close(conn)
             return
         
         request = self.try_process(conn)
@@ -170,6 +191,7 @@ class HTTPServer:
 
 
     def handle_write(self, conn):
+        peer = self.peers.get(conn, '<unknown>')
         self.last_active[conn] = time.time()
 
         while self.responses[conn] != b'':
@@ -180,7 +202,7 @@ class HTTPServer:
                 return
 
         if not self.keep_alive[conn]:
-            self.logger.info("Closing connection %s after response", conn.getpeername())
+            self.logger.info("Closing connection %s after response", peer)
             self.close(conn)
         else:
             self.sel.modify(conn, selectors.EVENT_READ, self.handle_read)
@@ -266,6 +288,7 @@ class HTTPServer:
             peer = None
         self.logger.info("Closed connection %s", peer or conn)
         try:
+            self.logger.info("Closing connection %s", peer)
             conn.close()
         except OSError: 
             pass # Already closed at the OS level

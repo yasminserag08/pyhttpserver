@@ -2,7 +2,6 @@ import socket
 import io
 import os
 import sys
-import threading
 from concurrent.futures import ThreadPoolExecutor
 from common.request import HTTPRequest
 from common.config_loader import load_server_config
@@ -19,6 +18,7 @@ class HTTPServer:
         self.logger = get_logger(__name__)
 
         self.pool = ThreadPoolExecutor(max_workers=50)
+        self.peers = {}
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listen_socket.bind((self.host, self.port))
@@ -28,14 +28,12 @@ class HTTPServer:
     def serve_forever(self):
         while True:
             conn, addr = self.listen_socket.accept()
+            self.peers[conn] = addr
             self.logger.info("Accepted new connection from %s", addr)
             self.pool.submit(self.handle_one_request, conn)
 
     def handle_one_request(self, conn):
-        try:
-            peer = conn.getpeername()
-        except OSError:
-            peer = None
+        peer = self.peers.get(conn, '<unknown>')
         self.logger.info("Started request handler for connection %s", peer)
         connection_buffer = b""
         conn.settimeout(self.timeout_seconds)
@@ -79,9 +77,11 @@ class HTTPServer:
             conn.sendall(response)
             if not keep_alive:
                 self.logger.info("Closing connection %s because client requested close", peer)
+                self.peers.pop(conn, None)
                 conn.close()
                 return 
-        self.logger.info("Closing connection %s after request loop", peer)
+        self.logger.info("Closing connection %s", peer)
+        self.peers.pop(conn, None)
         conn.close()
 
     # Helper function to parse HTTP requests
