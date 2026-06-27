@@ -5,6 +5,7 @@ import sys
 import time
 from common.request import HTTPRequest
 from common.config_loader import load_server_config
+from common.logger import get_logger
 
 class HTTPServer:
     def __init__(self, host='', port=8888, timeout_seconds=15.0, max_read_chunk=1024, app=None):
@@ -13,15 +14,19 @@ class HTTPServer:
         self.timeout_seconds = timeout_seconds
         self.max_read_chunk = max_read_chunk
         self.app = app
+
+        self.logger = get_logger(__name__)
+
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.listen_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.listen_socket.bind((self.host, self.port))
         self.listen_socket.listen()
+        self.logger.info("Starting blocking HTTP server on %s:%s", self.host or '0.0.0.0', self.port)
 
     def serve_forever(self):
         while True:
             conn, addr = self.listen_socket.accept()
-            print("Connected to ", addr)
+            self.logger.info("Connected to %s", addr)
             self.handle_one_request(conn)
 
     def handle_one_request(self, conn):
@@ -32,7 +37,7 @@ class HTTPServer:
             try:
                 result = self.parse_request(conn, connection_buffer)
             except socket.timeout:
-                print(f"Connection timed out")
+                self.logger.warning("Connection timed out for %s", conn.getpeername())
                 break
 
             if not result:
@@ -51,6 +56,7 @@ class HTTPServer:
                 response_status.append(status)
                 response_headers.extend(headers)
             
+            self.logger.info("Handling request %s %s from %s", request.method, request.path, conn.getpeername())
             # Build the WSGI environ
             environ = self.build_environ(request)
 
@@ -58,13 +64,15 @@ class HTTPServer:
                 # Call the WSGI application 
                 wsgi_result = self.app(environ, start_response)
             except Exception as e:
-                print(f"Internal Server Error: {e}", file=sys.stderr)
+                self.logger.exception("Internal Server Error")
                 response_status = ['500 INTERNAL SERVER ERROR']
                 response_headers = [('Content-Type', 'text/plain')]
                 wsgi_result = [b'Internal Server Error: The application crashed.'] 
             response = self.finish_response(wsgi_result, response_status, response_headers, keep_alive)
+            self.logger.info("Sending response %s for %s (%d bytes), keep_alive=%s", response_status[0], conn.getpeername(), len(response), keep_alive)
             conn.sendall(response)
             if not keep_alive: 
+                self.logger.info("Closing connection %s because client requested close", conn.getpeername())
                 conn.close()
                 return 
         conn.close()

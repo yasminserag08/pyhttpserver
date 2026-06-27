@@ -7,6 +7,7 @@ import time
 import signal
 from common.request import HTTPRequest
 from common.config_loader import load_server_config
+from common.logger import get_logger
 
 class HTTPServer:
     def __init__(self, host='', port=8888, timeout_seconds=15.0, max_read_chunk=1024, app=None):
@@ -20,6 +21,8 @@ class HTTPServer:
         self.running = True 
         signal.signal(signal.SIGINT, self.handle_exit_signal)
         signal.signal(signal.SIGTERM, self.handle_exit_signal)
+
+        self.logger = get_logger(__name__)
 
         self.sel = selectors.DefaultSelector() # pick selector based on OS
 
@@ -36,9 +39,10 @@ class HTTPServer:
         self.listen_socket.bind((self.host, self.port))
         self.listen_socket.listen()
         self.sel.register(self.listen_socket, selectors.EVENT_READ, self.accept_connection)
+        self.logger.info("Starting event-loop HTTP server on %s:%s", self.host or '0.0.0.0', self.port)
 
     def handle_exit_signal(self, signum, frame):
-        print("\n[Shutdown] Termination signal received. Initiating exit...")
+        self.logger.info("[Shutdown] Termination signal received. Initiating exit...")
         self.running = False  
 
     def serve_forever(self):
@@ -50,15 +54,15 @@ class HTTPServer:
                 callback = key.data
                 callback(key.fileobj)
 
-        print("[Shutdown] Closing listening socket to reject new traffic...")
+        self.logger.info("[Shutdown] Closing listening socket to reject new traffic...")
         try:
             self.sel.unregister(self.listen_socket)
             self.listen_socket.close()
         except Exception:
             pass
 
-        print(f"[Shutdown] Draining active connection states...")
-        
+        self.logger.info("[Shutdown] Draining active connection states...")        
+
         active_connections = list(getattr(self, 'client_buffers', {}).keys())
         
         for conn in active_connections:
@@ -73,8 +77,8 @@ class HTTPServer:
 
         # Close down the core selector 
         self.sel.close()
-        print("[Shutdown] Server halted cleanly.")
-
+        self.logger.info("[Shutdown] Server halted cleanly.")
+        
     def clean_timeouts(self):
         now = time.time()
         now = time.time()
@@ -85,11 +89,13 @@ class HTTPServer:
                 timed_out_connections.append(conn)
         
         for conn in timed_out_connections:
+            self.logger.info("Connection timed out and will be closed: %s", conn)
             self.close(conn)
 
 
     def accept_connection(self, sock):
         conn, addr = sock.accept()
+        self.logger.info(f"Accepted connection from {addr}")
         conn.setblocking(False)
         self.client_buffers[conn] = b'' # initialize buffer
         self.parsed_requests[conn] = None
@@ -120,6 +126,7 @@ class HTTPServer:
 
     # Handles everything related to WSGI
     def dispatch(self, conn, request):
+        self.logger.info("Dispatching request %s %s from %s", request.method, request.path, conn.getpeername())
         environ = self.build_environ(request)
         response_status = []
         response_headers = []
@@ -131,12 +138,13 @@ class HTTPServer:
         try:
             result = self.app(environ, start_response)
         except Exception as e:
-            print(f"Internal Server Error: {e}", file=sys.stderr)
+            self.logger.exception("Internal Server Error")
             response_status = ['500 INTERNAL SERVER ERROR']
             response_headers = [('Content-Type', 'text/plain')]
             result = [b'Internal Server Error: The application crashed.']
 
         self.responses[conn] = self.finish_response(result, response_status, response_headers)
+        self.logger.info("Prepared response %s for %s (%d bytes)", response_status[0], conn.getpeername(), len(self.responses[conn]))
 
         keep_alive = request.headers.get('connection')
         self.keep_alive[conn] = (keep_alive is None or keep_alive == 'keep-alive')
@@ -148,6 +156,7 @@ class HTTPServer:
         try:
             data = conn.recv(self.max_read_chunk)
             if not data:
+                self.logger.info("Connection closed by peer %s", conn.getpeername())
                 self.close(conn)
                 return
             self.client_buffers[conn] += data
@@ -171,6 +180,7 @@ class HTTPServer:
                 return
 
         if not self.keep_alive[conn]:
+            self.logger.info("Closing connection %s after response", conn.getpeername())
             self.close(conn)
         else:
             self.sel.modify(conn, selectors.EVENT_READ, self.handle_read)
@@ -185,7 +195,14 @@ class HTTPServer:
         parts = buf.split(b"\r\n\r\n", 1)
         raw_headers = parts[0].decode('utf-8')
         lines = raw_headers.splitlines()
-        method, path, _ = lines[0].split(' ')
+        if not lines:
+            self.logger.warning("Received empty or malformed request headers")
+            raise ValueError("Malformed HTTP request")
+        try:
+            method, path, _ = lines[0].split(' ')
+        except ValueError:
+            self.logger.warning("Unable to parse request line: %s", lines[0] if lines else '<empty>')
+            raise
         headers_dict = {}
         for line in lines[1:]:
             if ":" in line:
@@ -243,6 +260,11 @@ class HTTPServer:
         self.parsed_requests.pop(conn, None)
         self.last_active.pop(conn, None)
         self.keep_alive.pop(conn, None)
+        try:
+            peer = conn.getpeername()
+        except OSError:
+            peer = None
+        self.logger.info("Closed connection %s", peer or conn)
         try:
             conn.close()
         except OSError: 
