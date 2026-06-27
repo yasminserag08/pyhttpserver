@@ -4,6 +4,7 @@ import io
 import sys
 import os
 import time
+import signal
 from common.request import HTTPRequest
 from common.config_loader import load_server_config
 
@@ -14,7 +15,14 @@ class HTTPServer:
         self.timeout_seconds = timeout_seconds
         self.max_read_chunk = max_read_chunk
         self.app = app
+
+        # Graceful shutdown
+        self.running = True 
+        signal.signal(signal.SIGINT, self.handle_exit_signal)
+        signal.signal(signal.SIGTERM, self.handle_exit_signal)
+
         self.sel = selectors.DefaultSelector() # pick selector based on OS
+
         self.client_buffers = {}
         self.responses = {}
         self.parsed_requests = {}
@@ -29,24 +37,56 @@ class HTTPServer:
         self.listen_socket.listen()
         self.sel.register(self.listen_socket, selectors.EVENT_READ, self.accept_connection)
 
+    def handle_exit_signal(self, signum, frame):
+        print("\n[Shutdown] Termination signal received. Initiating exit...")
+        self.running = False  
+
     def serve_forever(self):
-        while True:
+        while self.running:
             # run house-cleaning regularly
-            events = self.sel.select(timeout=5.0)
+            events = self.sel.select(timeout=1.0)
                             
             for key, mask in events:
                 callback = key.data
                 callback(key.fileobj)
 
-            now = time.time()
-            timed_out_connections = []
+        print("[Shutdown] Closing listening socket to reject new traffic...")
+        try:
+            self.sel.unregister(self.listen_socket)
+            self.listen_socket.close()
+        except Exception:
+            pass
 
-            for conn, last_seen in self.last_active.items():
-                if now - last_seen > self.timeout_seconds:
-                    timed_out_connections.append(conn)
-            
-            for conn in timed_out_connections:
-                self.close(conn)
+        print(f"[Shutdown] Draining active connection states...")
+        
+        active_connections = list(getattr(self, 'client_buffers', {}).keys())
+        
+        for conn in active_connections:
+            # If there's a response remaining for this client, send it
+            if hasattr(self, 'responses') and conn in self.responses:
+                try:
+                    conn.setblocking(True) 
+                    conn.sendall(self.responses[conn])
+                except Exception:
+                    pass 
+            self.close(conn)
+
+        # Close down the core selector 
+        self.sel.close()
+        print("[Shutdown] Server halted cleanly.")
+
+    def clean_timeouts(self):
+        now = time.time()
+        now = time.time()
+        timed_out_connections = []
+
+        for conn, last_seen in self.last_active.items():
+            if now - last_seen > self.timeout_seconds:
+                timed_out_connections.append(conn)
+        
+        for conn in timed_out_connections:
+            self.close(conn)
+
 
     def accept_connection(self, sock):
         conn, addr = sock.accept()
