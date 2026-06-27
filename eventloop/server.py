@@ -1,15 +1,18 @@
 import socket
 import selectors
-from common.request import HTTPRequest
 import io
 import sys
 import os
 import time
+from common.request import HTTPRequest
+from common.config_loader import load_server_config
 
 class HTTPServer:
-    def __init__(self, host='', port=8888, app=None):
+    def __init__(self, host='', port=8888, timeout_seconds=15.0, max_read_chunk=1024, app=None):
         self.host = host
         self.port = port
+        self.timeout_seconds = timeout_seconds
+        self.max_read_chunk = max_read_chunk
         self.app = app
         self.sel = selectors.DefaultSelector() # pick selector based on OS
         self.client_buffers = {}
@@ -39,7 +42,7 @@ class HTTPServer:
             timed_out_connections = []
 
             for conn, last_seen in self.last_active.items():
-                if now - last_seen > 15.0:
+                if now - last_seen > self.timeout_seconds:
                     timed_out_connections.append(conn)
             
             for conn in timed_out_connections:
@@ -103,7 +106,7 @@ class HTTPServer:
     def handle_read(self, conn):
         self.last_active[conn] = time.time()
         try:
-            data = conn.recv(1024)
+            data = conn.recv(self.max_read_chunk)
             if not data:
                 self.close(conn)
                 return
@@ -230,5 +233,12 @@ if __name__ == "__main__":
     imported_module = __import__(module_name, fromlist=[variable_name])
     wsgi_callable = getattr(imported_module, variable_name)
 
-    server = HTTPServer(host='', port=8888, app=wsgi_callable)
+    config = load_server_config()
+    server = HTTPServer(
+        config["host"], 
+        config["port"], 
+        config["timeout_seconds"], 
+        config["max_read_chunk"], 
+        app=wsgi_callable
+    )
     server.serve_forever()

@@ -5,11 +5,14 @@ import sys
 import threading
 from concurrent.futures import ThreadPoolExecutor
 from common.request import HTTPRequest
+from common.config_loader import load_server_config
 
 class HTTPServer:
-    def __init__(self, host='', port=8888, app=None):
+    def __init__(self, host='', port=8888, timeout_seconds=15.0, max_read_chunk=1024, app=None):
         self.host = host
         self.port = port
+        self.timeout_seconds = timeout_seconds
+        self.max_read_chunk = max_read_chunk
         self.app = app
         self.pool = ThreadPoolExecutor(max_workers=50)
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -24,7 +27,7 @@ class HTTPServer:
 
     def handle_one_request(self, conn):
         connection_buffer = b""
-        conn.settimeout(15.0)
+        conn.settimeout(self.timeout_seconds)
         while True:
         # Parse the HTTP request
             try:
@@ -71,7 +74,7 @@ class HTTPServer:
     # Helper function to parse HTTP requests
     def parse_request(self, conn, connection_buffer):
         while b"\r\n\r\n" not in connection_buffer:
-            chunk = conn.recv(1024)
+            chunk = conn.recv(self.max_read_chunk)
             if not chunk: 
                 return None  # client closed connection 
             connection_buffer += chunk
@@ -117,7 +120,7 @@ class HTTPServer:
         environ = {
             'REQUEST_METHOD': request.method,
             'PATH_INFO': request.path,
-            'QUERY_STRING': '&'.join(f'{k}={v}' for k, v in request.query_params.items()),
+            'QUERY_STRING': request.query_string,
             'CONTENT_TYPE': request.headers.get('content-type', ''),
             'CONTENT_LENGTH': request.headers.get('content-length', ''),
             'SERVER_NAME': self.host or 'localhost',
@@ -143,6 +146,7 @@ class HTTPServer:
         status = response_status[0]
         body = b''.join(result)
         body_len = len(body)
+        if hasattr(result, 'close'): result.close()
         response = f'HTTP/1.1 {status}\r\n'
 
         # Check if Content-Length & Connection were already returned by wsgi app
@@ -187,6 +191,13 @@ if __name__ == "__main__":
     # dynamically import whatever was requested
     imported_module = __import__(module_name, fromlist=[variable_name])
     wsgi_callable = getattr(imported_module, variable_name)
+    config = load_server_config()
+    server = HTTPServer(
+        config["host"], 
+        config["port"], 
+        config["timeout_seconds"], 
+        config["max_read_chunk"], 
+        app=wsgi_callable
+    )
 
-    server = HTTPServer(host='', port=8888, app=wsgi_callable)
     server.serve_forever()

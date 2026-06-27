@@ -1,0 +1,6 @@
+{
+    "host": "127.0.0.1",
+    "port": 8888,
+    "timeout_seconds": 15.0,
+    "max_read_chunk": 1024
+}
