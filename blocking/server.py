@@ -1,3 +1,4 @@
+import argparse
 import socket 
 import io
 import os
@@ -186,11 +187,17 @@ if __name__ == "__main__":
         sys.path.insert(0, current_dir)
     
     # Get callable from command line
-    if len(sys.argv) < 2:
-        print("Usage: python3 server.py <module_name>:<variable_name>")
-        sys.exit(1)
+    config = load_server_config()
 
-    app_path = sys.argv[1]
+    parser = argparse.ArgumentParser(
+        description="Start the blocking WSGI server."
+    )
+    parser.add_argument("app_path", help="WSGI app in the form module:callable or apps.<name> if no module prefix is provided")
+    parser.add_argument("--port", type=int, default=config["port"],
+                        help=f"Port to bind. Defaults to config.json value {config['port']}")
+    args = parser.parse_args()
+
+    app_path = args.app_path
 
     if ":" in app_path:
         module_name, variable_name = app_path.split(":", 1)
@@ -201,11 +208,9 @@ if __name__ == "__main__":
     # dynamically import whatever was requested
     imported_module = __import__(module_name, fromlist=[variable_name])
     wsgi_callable = getattr(imported_module, variable_name)
-
-    config = load_server_config()
     server = HTTPServer(
         config["host"], 
-        config["port"], 
+        args.port, 
         config["timeout_seconds"], 
         config["max_read_chunk"], 
         app=wsgi_callable
