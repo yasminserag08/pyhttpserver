@@ -34,6 +34,7 @@ class HTTPServer:
         self.parsed_requests = {}
         self.keep_alive = {}
         self.last_active = {} # can't settimeout on non-blocking sockets
+        self.last_cleanup = time.time()
         self.peers = {}
         
         self.pool = ThreadPoolExecutor(max_workers=50) # for blocking tasks like calling app
@@ -56,13 +57,18 @@ class HTTPServer:
         while self.running:
             # run house-cleaning regularly
             events = self.sel.select(timeout=0.01)
-            self.clean_timeouts()
                             
             for key, mask in events:
                 callback = key.data
                 callback(key.fileobj)
 
             self.drain_queue()
+
+            now = time.time()
+            if now - self.last_cleanup > 5.0:
+                self.clean_timeouts()
+                self.last_cleanup = now
+
 
         self.logger.info("[Shutdown] Closing listening socket to reject new traffic...")
         try:
@@ -192,6 +198,9 @@ class HTTPServer:
 
 
     def handle_write(self, conn):
+        if conn not in self.responses:
+            return
+
         peer = self.peers.get(conn, '<unknown>')
         self.last_active[conn] = time.time()
 

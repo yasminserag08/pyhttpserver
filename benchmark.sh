@@ -67,7 +67,7 @@ check_dependencies
 
 # Clear and init output file
 echo "BENCHMARK RESULTS — $(date)" > "$OUTPUT_FILE"
-echo "wrk -t${THREADS} -d${DURATION} --latency -s ${LUA_SCRIPT}" >> "$OUTPUT_FILE"
+echo "wrk -t${THREADS} -d${DURATION} -s ${LUA_SCRIPT}" >> "$OUTPUT_FILE"
 
 # Ordered server list for consistent output
 SERVER_ORDER=("BLOCKING" "THREADED" "EVENTLOOP_V1" "EVENTLOOP_V2")
@@ -77,13 +77,14 @@ for SERVER in "${SERVER_ORDER[@]}"; do
 
   print_header "$SERVER (port $PORT)" | tee -a "$OUTPUT_FILE"
 
-  # Check server is up
   if ! wait_for_server "$PORT"; then
     echo "  SKIPPED — nothing listening on port $PORT" | tee -a "$OUTPUT_FILE"
     continue
   fi
 
-  for ROUTE in "${ROUTES[@]}"; do
+  SERVER_ROUTES=("${ROUTES[@]}")
+
+  for ROUTE in "${SERVER_ROUTES[@]}"; do
     echo "" | tee -a "$OUTPUT_FILE"
     echo "  Route: $ROUTE" | tee -a "$OUTPUT_FILE"
     echo "  $(printf -- '-%.0s' $(seq 1 40))" | tee -a "$OUTPUT_FILE"
@@ -92,12 +93,11 @@ for SERVER in "${SERVER_ORDER[@]}"; do
       echo "" | tee -a "$OUTPUT_FILE"
       echo "  [-t${THREADS} -c${C} -d${DURATION}]" | tee -a "$OUTPUT_FILE"
 
-      wrk -t"$THREADS" -c"$C" -d"$DURATION" --latency \
+      wrk -t"$THREADS" -c"$C" -d"$DURATION" \
         -s "$LUA_SCRIPT" \
         "http://127.0.0.1:${PORT}${ROUTE}" 2>&1 | \
         sed 's/^/    /' | tee -a "$OUTPUT_FILE"
 
-      # Small pause between runs so the server can drain connections
       sleep 2
     done
   done

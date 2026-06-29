@@ -1,0 +1,625 @@
+BENCHMARK RESULTS — Sun Jun 28 17:03:01 EEST 2026
+wrk -t4 -d10s -s ./latency.lua
+
+============================================================
+  BLOCKING (port 8888)
+============================================================
+
+  Route: /
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   424.34us  244.71us  16.00ms   95.84%
+        Req/Sec     2.36k   292.28     2.64k    89.11%
+      23747 requests in 10.10s, 2.94MB read
+    Requests/sec:   2351.48
+    Transfer/sec:    298.53KB
+    
+    --- Latency Percentiles ---
+      p50       0.39ms
+      p75       0.45ms
+      p90       0.55ms
+      p99       0.95ms
+      p99.9     1.86ms
+      max     16.00ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   443.83us  169.19us   8.23ms   91.47%
+        Req/Sec     2.25k   270.01     2.59k    74.26%
+      22628 requests in 10.10s, 2.81MB read
+    Requests/sec:   2240.57
+    Transfer/sec:    284.45KB
+    
+    --- Latency Percentiles ---
+      p50       0.41ms
+      p75       0.47ms
+      p90       0.59ms
+      p99       1.01ms
+      p99.9     1.86ms
+      max      8.23ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     1.75ms    1.47ms  30.78ms   94.56%
+        Req/Sec   573.31    212.55     1.25k    69.00%
+      5716 requests in 10.03s, 725.66KB read
+    Requests/sec:    569.79
+    Transfer/sec:     72.34KB
+    
+    --- Latency Percentiles ---
+      p50       1.47ms
+      p75       1.80ms
+      p90       2.33ms
+      p99       9.15ms
+      p99.9    16.70ms
+      max     30.78ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   699.77us  408.12us   8.49ms   87.54%
+        Req/Sec     1.43k   470.75     2.28k    54.00%
+      14193 requests in 10.02s, 1.76MB read
+    Requests/sec:   1416.86
+    Transfer/sec:    179.87KB
+    
+    --- Latency Percentiles ---
+      p50       0.57ms
+      p75       0.84ms
+      p90       1.18ms
+      p99       2.04ms
+      p99.9     4.23ms
+      max      8.49ms
+
+  Route: /slow
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/slow
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   120.13ms  183.32ms   1.92s    98.98%
+        Req/Sec     9.77      1.23    10.00     96.94%
+      98 requests in 11.84s, 10.14KB read
+    Requests/sec:      8.28
+    Transfer/sec:      0.86KB
+    
+    --- Latency Percentiles ---
+      p50     101.51ms
+      p75     101.81ms
+      p90     102.60ms
+      p99     1916.36ms
+      p99.9   1916.36ms
+      max    1916.36ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/slow
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   101.49ms  419.17us 103.25ms   70.41%
+        Req/Sec     9.86      0.80    10.00     94.90%
+      98 requests in 10.02s, 10.14KB read
+    Requests/sec:      9.78
+    Transfer/sec:      1.01KB
+    
+    --- Latency Percentiles ---
+      p50     101.43ms
+      p75     101.73ms
+      p90     102.07ms
+      p99     103.25ms
+      p99.9   103.25ms
+      max    103.25ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/slow
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   105.03ms   34.66ms 439.31ms   98.95%
+        Req/Sec     9.83      0.97    10.00     97.89%
+      95 requests in 10.02s, 9.83KB read
+    Requests/sec:      9.48
+    Transfer/sec:      0.98KB
+    
+    --- Latency Percentiles ---
+      p50     101.36ms
+      p75     101.75ms
+      p90     102.10ms
+      p99     439.31ms
+      p99.9   439.31ms
+      max    439.31ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8888/slow
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   126.86ms  212.14ms   1.88s    98.57%
+        Req/Sec     9.70      1.67    10.00     97.18%
+      71 requests in 11.80s, 7.35KB read
+      Socket errors: connect 0, read 0, write 0, timeout 1
+    Requests/sec:      6.02
+    Transfer/sec:     637.69B
+    
+    --- Latency Percentiles ---
+      p50     101.45ms
+      p75     101.72ms
+      p90     102.08ms
+      p99     1876.36ms
+      p99.9   1876.36ms
+      max    1876.36ms
+
+============================================================
+  THREADED (port 8889)
+============================================================
+
+  Route: /
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     7.66ms    7.87ms 134.06ms   98.88%
+        Req/Sec   285.16     70.98   565.00     73.99%
+      11316 requests in 10.01s, 1.40MB read
+    Requests/sec:   1130.38
+    Transfer/sec:    143.51KB
+    
+    --- Latency Percentiles ---
+      p50       6.85ms
+      p75       8.42ms
+      p90       9.78ms
+      p99      22.14ms
+      p99.9   123.72ms
+      max    134.06ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    20.02ms    9.82ms 106.10ms   83.25%
+        Req/Sec   306.35    127.73   540.00     61.00%
+      12209 requests in 10.01s, 1.51MB read
+    Requests/sec:   1219.35
+    Transfer/sec:    154.80KB
+    
+    --- Latency Percentiles ---
+      p50      15.90ms
+      p75      25.41ms
+      p90      33.95ms
+      p99      51.34ms
+      p99.9    77.06ms
+      max    106.10ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    63.27ms   30.76ms 517.58ms   92.63%
+        Req/Sec   196.50     67.38   770.00     87.66%
+      7784 requests in 10.02s, 0.97MB read
+    Requests/sec:    776.79
+    Transfer/sec:     98.62KB
+    
+    --- Latency Percentiles ---
+      p50      64.19ms
+      p75      71.94ms
+      p90      79.87ms
+      p99     175.81ms
+      p99.9   448.23ms
+      max    517.58ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    40.80ms   30.31ms 719.80ms   96.73%
+        Req/Sec   319.59    146.89   760.00     67.42%
+      12710 requests in 10.02s, 1.58MB read
+    Requests/sec:   1268.72
+    Transfer/sec:    161.07KB
+    
+    --- Latency Percentiles ---
+      p50      33.92ms
+      p75      41.02ms
+      p90      61.63ms
+      p99      79.19ms
+      p99.9   521.97ms
+      max    719.80ms
+
+  Route: /slow
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/slow
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   194.95ms  314.28ms   1.76s    91.67%
+        Req/Sec    19.42      2.69    20.00     95.48%
+      784 requests in 11.73s, 81.16KB read
+    Requests/sec:     66.86
+    Transfer/sec:      6.92KB
+    
+    --- Latency Percentiles ---
+      p50     101.93ms
+      p75     103.46ms
+      p90     259.78ms
+      p99     1613.19ms
+      p99.9   1763.53ms
+      max    1763.53ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/slow
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   103.45ms    3.48ms 129.15ms   87.80%
+        Req/Sec    58.07      6.33    60.00     88.64%
+      2312 requests in 10.02s, 239.33KB read
+    Requests/sec:    230.75
+    Transfer/sec:     23.89KB
+    
+    --- Latency Percentiles ---
+      p50     102.18ms
+      p75     104.33ms
+      p90     107.79ms
+      p99     116.23ms
+      p99.9   127.68ms
+      max    129.15ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/slow
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   103.17ms    4.18ms 143.35ms   91.42%
+        Req/Sec   116.94      9.97   121.00     91.92%
+      4640 requests in 10.02s, 480.31KB read
+    Requests/sec:    463.05
+    Transfer/sec:     47.93KB
+    
+    --- Latency Percentiles ---
+      p50     101.75ms
+      p75     103.61ms
+      p90     106.73ms
+      p99     118.65ms
+      p99.9   141.30ms
+      max    143.35ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8889/slow
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   167.61ms  263.38ms   1.76s    93.93%
+        Req/Sec   233.25     37.05   252.00     89.45%
+      4694 requests in 11.75s, 485.90KB read
+    Requests/sec:    399.64
+    Transfer/sec:     41.37KB
+    
+    --- Latency Percentiles ---
+      p50     104.52ms
+      p75     110.95ms
+      p90     121.77ms
+      p99     1747.94ms
+      p99.9   1758.21ms
+      max    1760.48ms
+
+============================================================
+  EVENTLOOP_V1 (port 8890)
+============================================================
+
+  Route: /
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     3.13ms    4.82ms  79.97ms   98.06%
+        Req/Sec   747.36    187.83     2.76k    82.79%
+      29838 requests in 10.10s, 3.02MB read
+    Requests/sec:   2954.29
+    Transfer/sec:    305.82KB
+    
+    --- Latency Percentiles ---
+      p50       2.34ms
+      p75       2.98ms
+      p90       3.95ms
+      p99      15.23ms
+      p99.9    71.50ms
+      max     79.97ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    12.27ms    7.74ms  73.71ms   86.59%
+        Req/Sec   522.64    221.68     0.96k    54.00%
+      20824 requests in 10.01s, 2.11MB read
+    Requests/sec:   2079.41
+    Transfer/sec:    215.25KB
+    
+    --- Latency Percentiles ---
+      p50       9.28ms
+      p75      13.69ms
+      p90      22.13ms
+      p99      42.65ms
+      p99.9    63.01ms
+      max     73.72ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    19.95ms    8.14ms 200.80ms   88.56%
+        Req/Sec   612.68    161.88     1.48k    60.90%
+      24374 requests in 10.01s, 2.46MB read
+    Requests/sec:   2435.10
+    Transfer/sec:    252.07KB
+    
+    --- Latency Percentiles ---
+      p50      17.74ms
+      p75      23.45ms
+      p90      28.10ms
+      p99      39.36ms
+      p99.9   127.59ms
+      max    200.80ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    43.84ms   40.29ms 710.26ms   97.57%
+        Req/Sec   625.75    248.88     2.99k    76.88%
+      24820 requests in 10.02s, 2.51MB read
+    Requests/sec:   2476.01
+    Transfer/sec:    256.31KB
+    
+    --- Latency Percentiles ---
+      p50      35.02ms
+      p75      51.03ms
+      p90      59.91ms
+      p99     219.91ms
+      p99.9   565.19ms
+      max    710.26ms
+
+  Route: /slow
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/slow
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   788.96ms  227.06ms   1.92s    83.91%
+        Req/Sec     2.41      1.28    10.00     80.21%
+      96 requests in 11.74s, 7.69KB read
+      Socket errors: connect 0, read 0, write 0, timeout 9
+    Requests/sec:      8.18
+    Transfer/sec:     670.39B
+    
+    --- Latency Percentiles ---
+      p50     807.48ms
+      p75     808.70ms
+      p90     1010.47ms
+      p99     1922.45ms
+      p99.9   1922.45ms
+      max    1922.45ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/slow
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     1.26s   442.27ms   1.93s    58.23%
+        Req/Sec     6.38      3.83    10.00     74.44%
+      90 requests in 10.02s, 7.21KB read
+      Socket errors: connect 0, read 0, write 0, timeout 11
+    Requests/sec:      8.98
+    Transfer/sec:     736.48B
+    
+    --- Latency Percentiles ---
+      p50     1314.23ms
+      p75     1619.79ms
+      p90     1817.98ms
+      p99     1927.24ms
+      p99.9   1927.24ms
+      max    1927.24ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/slow
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     1.27s   433.14ms   1.83s    58.97%
+        Req/Sec     7.20      3.79    10.00     78.65%
+      89 requests in 10.02s, 7.13KB read
+      Socket errors: connect 0, read 0, write 0, timeout 11
+    Requests/sec:      8.88
+    Transfer/sec:     728.29B
+    
+    --- Latency Percentiles ---
+      p50     1320.54ms
+      p75     1625.53ms
+      p90     1827.09ms
+      p99     1828.74ms
+      p99.9   1828.74ms
+      max    1828.74ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8890/slow
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     1.23s   366.47ms   1.98s    70.59%
+        Req/Sec     9.04      2.29    10.00     84.72%
+      72 requests in 11.67s, 5.77KB read
+      Socket errors: connect 0, read 0, write 0, timeout 21
+    Requests/sec:      6.17
+    Transfer/sec:     506.03B
+    
+    --- Latency Percentiles ---
+      p50     1319.77ms
+      p75     1522.85ms
+      p90     1623.86ms
+      p99     1983.59ms
+      p99.9   1983.59ms
+      max    1983.59ms
+
+============================================================
+  EVENTLOOP_V2 (port 8891)
+============================================================
+
+  Route: /
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     3.21ms    2.04ms  55.99ms   95.45%
+        Req/Sec   646.03    104.15     0.86k    76.00%
+      25741 requests in 10.01s, 2.60MB read
+    Requests/sec:   2571.49
+    Transfer/sec:    266.19KB
+    
+    --- Latency Percentiles ---
+      p50       2.85ms
+      p75       3.46ms
+      p90       4.39ms
+      p99       8.53ms
+      p99.9    37.07ms
+      max     55.99ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency     9.60ms    5.39ms 103.57ms   97.25%
+        Req/Sec   650.47     91.77     0.91k    72.50%
+      25909 requests in 10.01s, 2.62MB read
+    Requests/sec:   2588.71
+    Transfer/sec:    267.97KB
+    
+    --- Latency Percentiles ---
+      p50       8.85ms
+      p75       9.97ms
+      p90      11.34ms
+      p99      19.73ms
+      p99.9    87.27ms
+      max    103.56ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency    23.35ms   12.01ms 309.82ms   94.17%
+        Req/Sec   530.75    121.84     1.34k    70.43%
+      21100 requests in 10.01s, 2.13MB read
+    Requests/sec:   2108.05
+    Transfer/sec:    218.22KB
+    
+    --- Latency Percentiles ---
+      p50      21.49ms
+      p75      24.83ms
+      p90      29.69ms
+      p99      50.14ms
+      p99.9   211.44ms
+      max    309.81ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   106.33ms  172.99ms   1.97s    96.03%
+        Req/Sec   314.92     96.77     1.20k    87.25%
+      12553 requests in 10.01s, 1.27MB read
+      Socket errors: connect 0, read 0, write 0, timeout 5
+    Requests/sec:   1254.00
+    Transfer/sec:    129.81KB
+    
+    --- Latency Percentiles ---
+      p50      76.01ms
+      p75      85.05ms
+      p90      97.92ms
+      p99     1141.22ms
+      p99.9   1749.22ms
+      max    1970.55ms
+
+  Route: /slow
+  ----------------------------------------
+
+  [-t4 -c10 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/slow
+      4 threads and 10 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   193.30ms  302.32ms   1.72s    92.37%
+        Req/Sec    19.18      3.03    20.00     92.93%
+      759 requests in 11.64s, 60.78KB read
+    Requests/sec:     65.23
+    Transfer/sec:      5.22KB
+    
+    --- Latency Percentiles ---
+      p50     105.28ms
+      p75     106.78ms
+      p90     168.13ms
+      p99     1566.15ms
+      p99.9   1721.30ms
+      max    1721.30ms
+
+  [-t4 -c25 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/slow
+      4 threads and 25 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   107.10ms    2.98ms 120.07ms   68.37%
+        Req/Sec    56.24      8.90    60.00     88.04%
+      2232 requests in 10.02s, 178.73KB read
+    Requests/sec:    222.73
+    Transfer/sec:     17.84KB
+    
+    --- Latency Percentiles ---
+      p50     106.69ms
+      p75     109.06ms
+      p90     111.00ms
+      p99     116.13ms
+      p99.9   118.99ms
+      max    120.07ms
+
+  [-t4 -c50 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/slow
+      4 threads and 50 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   108.69ms    3.91ms 135.45ms   78.39%
+        Req/Sec   110.74     19.29   121.00     86.62%
+      4397 requests in 10.02s, 352.10KB read
+    Requests/sec:    439.03
+    Transfer/sec:     35.16KB
+    
+    --- Latency Percentiles ---
+      p50     108.55ms
+      p75     110.44ms
+      p90     112.19ms
+      p99     124.45ms
+      p99.9   135.45ms
+      max    135.45ms
+
+  [-t4 -c100 -d10s]
+    Running 10s test @ http://127.0.0.1:8891/slow
+      4 threads and 100 connections
+      Thread Stats   Avg      Stdev     Max   +/- Stdev
+        Latency   331.68ms  383.30ms   1.98s    89.38%
+        Req/Sec   122.71     50.70   252.00     71.34%
+      4950 requests in 11.85s, 396.39KB read
+    Requests/sec:    417.71
+    Transfer/sec:     33.45KB
+    
+    --- Latency Percentiles ---
+      p50     202.04ms
+      p75     206.98ms
+      p90     759.19ms
+      p99     1969.38ms
+      p99.9   1974.98ms
+      max    1978.88ms
+

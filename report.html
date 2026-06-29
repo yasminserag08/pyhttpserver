@@ -1,0 +1,1242 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Server Benchmark Report</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+  :root {
+    --bg:        #0f1117;
+    --surface:   #181c27;
+    --surface2:  #1f2435;
+    --border:    #2a3050;
+    --text:      #e2e8f0;
+    --muted:     #7a85a0;
+    --accent:    #4a9eda;
+    --green:     #52b788;
+    --font-mono: "JetBrains Mono","Fira Mono","Cascadia Code",monospace;
+    --font-sans: "Inter",system-ui,sans-serif;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: var(--bg); color: var(--text); font-family: var(--font-sans); font-size: 14px; line-height: 1.6; }
+
+  /* header */
+  header { padding: 36px 48px 28px; border-bottom: 1px solid var(--border); }
+  header h1 { font-size: 20px; font-weight: 600; letter-spacing: -0.02em; margin-bottom: 4px; }
+  header p  { color: var(--muted); font-size: 13px; }
+  .legend { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 14px; }
+  .legend-item { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+  .legend-dot  { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
+
+  /* nav */
+  nav {
+    display: flex; gap: 8px; padding: 14px 48px;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    position: sticky; top: 0; z-index: 10; overflow-x: auto;
+  }
+  nav button {
+    background: none; border: 1px solid var(--border); color: var(--muted);
+    padding: 5px 14px; border-radius: 6px; cursor: pointer; font-size: 12px;
+    white-space: nowrap; transition: all 0.15s;
+  }
+  nav button.active, nav button:hover {
+    border-color: var(--accent); color: var(--accent); background: #4a9eda14;
+  }
+
+  /* main */
+  main { padding: 32px 48px 64px; max-width: 1400px; }
+  .section { display: none; }
+  .section.active { display: block; }
+  .section-title {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.08em; color: var(--muted);
+    margin-bottom: 24px; padding-bottom: 10px; border-bottom: 1px solid var(--border);
+  }
+
+  /* summary */
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(520px, 1fr));
+    gap: 40px;
+  }
+  .route-block h4 {
+    font-size: 13px; font-weight: 600; color: var(--text);
+    margin-bottom: 16px;
+  }
+  .metric-group { margin-bottom: 20px; }
+  .metric-group-label {
+    font-size: 11px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.07em; color: var(--muted); margin-bottom: 6px;
+  }
+  .table-wrap { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; }
+  table { width: 100%; border-collapse: collapse; }
+  th {
+    background: var(--surface2); color: var(--muted);
+    font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 7px 12px; text-align: right; border-bottom: 1px solid var(--border); white-space: nowrap;
+  }
+  th:first-child { text-align: left; min-width: 160px; }
+  td {
+    padding: 7px 12px; border-bottom: 1px solid var(--border);
+    font-family: var(--font-mono); font-size: 12px; color: var(--muted);
+    text-align: right; white-space: nowrap;
+  }
+  td:first-child { text-align: left; color: var(--text); font-weight: 500; }
+  tr:last-child td { border-bottom: none; }
+  tr:hover td { background: var(--surface2); }
+  td.winner { color: var(--green); font-weight: 700; }
+  .server-dot {
+    display: inline-block; width: 8px; height: 8px;
+    border-radius: 50%; margin-right: 7px; vertical-align: middle; flex-shrink: 0;
+  }
+
+  /* charts */
+  .chart-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(560px, 1fr));
+    gap: 24px;
+  }
+  .chart-card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 10px; padding: 20px 24px;
+  }
+  .chart-card h3 { font-size: 13px; font-weight: 500; color: var(--muted); margin-bottom: 14px; }
+  .chart-card h3 strong { color: var(--text); display: block; font-size: 14px; margin-bottom: 2px; }
+  .chart-wrap { position: relative; height: 240px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>Python Web Server — Benchmark Report</h1>
+  <p>Median across <strong>10</strong> runs &nbsp;·&nbsp; 2026-06-29 21:51 &nbsp;·&nbsp; <code>./benchmark_runs</code></p>
+  <div class="legend" id="legend"></div>
+</header>
+
+<nav id="nav"></nav>
+<main><div id="sections"></div></main>
+
+<script>
+const ROUTE_GROUPS = {
+  "___fast_route_": {
+    "label": "/ (fast route)",
+    "charts": [
+      {
+        "title": "Requests / sec  \u2014  / (fast route)",
+        "ylabel": "req/s  (higher is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                2406.905,
+                1890.91,
+                1739.145,
+                1887.355
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                1613.885,
+                1489.565,
+                1576.37,
+                1454.235
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                2416.16,
+                2120.36,
+                2122.475,
+                2035.425
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                2126.725,
+                2296.25,
+                2272.405,
+                1515.005
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      },
+      {
+        "title": "p50 Latency  \u2014  / (fast route)",
+        "ylabel": "latency (ms)  (lower is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                0.345,
+                0.385,
+                0.425,
+                0.435
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                3.74,
+                13.605,
+                26.84,
+                28.165
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                2.445,
+                9.665,
+                19.05,
+                34.755
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                2.995,
+                8.87,
+                18.715,
+                45.08
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      },
+      {
+        "title": "p99 Latency  \u2014  / (fast route)",
+        "ylabel": "latency (ms)  (lower is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                1.33,
+                1.34,
+                1.615,
+                1.625
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                36.35,
+                29.83,
+                75.765,
+                69.835
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                14.84,
+                30.095,
+                70.14,
+                203.135
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                12.25,
+                18.625,
+                40.04,
+                449.025
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      },
+      {
+        "title": "p99.9 Latency  \u2014  / (fast route)",
+        "ylabel": "latency (ms)  (lower is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                9.955,
+                7.44,
+                7.24,
+                6.755
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                101.925,
+                71.055,
+                254.755,
+                231.305
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                48.305,
+                78.79,
+                183.83,
+                549.35
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                68.145,
+                36.16,
+                142.475,
+                912.27
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      }
+    ]
+  },
+  "_slow": {
+    "label": "/slow",
+    "charts": [
+      {
+        "title": "Requests / sec  \u2014  /slow",
+        "ylabel": "req/s  (higher is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                9.78,
+                9.78,
+                9.43,
+                7.035
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                78.16,
+                232.28,
+                451.32,
+                473.38
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                9.41,
+                8.88,
+                8.23,
+                7.09
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                75.075,
+                221.49,
+                438.825,
+                491.99
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      },
+      {
+        "title": "p50 Latency  \u2014  /slow",
+        "ylabel": "latency (ms)  (lower is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                101.36,
+                101.5,
+                101.45,
+                101.5
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                101.64,
+                101.66,
+                101.705,
+                101.96
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                808.535,
+                1319.755,
+                1416.845,
+                1217.77
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                105.45,
+                107.625,
+                108.055,
+                201.575
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      },
+      {
+        "title": "p99 Latency  \u2014  /slow",
+        "ylabel": "latency (ms)  (lower is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                103.45,
+                102.97,
+                449.84,
+                102.97
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                107.035,
+                112.695,
+                120.625,
+                119.87
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                1924.915,
+                1926.935,
+                1925.245,
+                1769.705
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                110.4,
+                116.13,
+                121.305,
+                218.195
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      },
+      {
+        "title": "p99.9 Latency  \u2014  /slow",
+        "ylabel": "latency (ms)  (lower is better)",
+        "data": {
+          "labels": [
+            "10",
+            "25",
+            "50",
+            "100"
+          ],
+          "datasets": [
+            {
+              "label": "Blocking",
+              "data": [
+                103.45,
+                102.97,
+                449.84,
+                102.97
+              ],
+              "borderColor": "#e05252",
+              "backgroundColor": "#e0525233",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "circle",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Threaded",
+              "data": [
+                110.695,
+                120.665,
+                137.105,
+                137.45
+              ],
+              "borderColor": "#f0a030",
+              "backgroundColor": "#f0a03033",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "triangle",
+              "pointRadius": 6,
+              "pointHoverRadius": 8
+            },
+            {
+              "label": "Event Loop v1",
+              "data": [
+                1924.915,
+                1926.935,
+                1925.245,
+                1769.705
+              ],
+              "borderColor": "#4a9eda",
+              "backgroundColor": "#4a9eda33",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "rect",
+              "pointRadius": 5,
+              "pointHoverRadius": 7
+            },
+            {
+              "label": "Event Loop v2 (pool)",
+              "data": [
+                110.905,
+                122.535,
+                128.81,
+                223.2
+              ],
+              "borderColor": "#52b788",
+              "backgroundColor": "#52b78833",
+              "tension": 0.3,
+              "borderWidth": 2,
+              "borderDash": [],
+              "pointStyle": "star",
+              "pointRadius": 7,
+              "pointHoverRadius": 9
+            }
+          ]
+        }
+      }
+    ]
+  }
+};
+const SUMMARY      = {
+  "___fast_route_": {
+    "label": "/ (fast route)",
+    "rows": [
+      {
+        "c": 10,
+        "BLOCKING": {
+          "rps": 2406.9049999999997,
+          "p50": 0.345,
+          "p90": 0.565,
+          "p99": 1.33,
+          "p99.9": 9.955
+        },
+        "THREADED": {
+          "rps": 1613.885,
+          "p50": 3.74,
+          "p90": 5.845000000000001,
+          "p99": 36.35,
+          "p99.9": 101.925
+        },
+        "EVENTLOOP_V1": {
+          "rps": 2416.16,
+          "p50": 2.4450000000000003,
+          "p90": 4.325,
+          "p99": 14.84,
+          "p99.9": 48.305
+        },
+        "EVENTLOOP_V2": {
+          "rps": 2126.7250000000004,
+          "p50": 2.995,
+          "p90": 5.015000000000001,
+          "p99": 12.25,
+          "p99.9": 68.14500000000001
+        }
+      },
+      {
+        "c": 25,
+        "BLOCKING": {
+          "rps": 1890.9099999999999,
+          "p50": 0.385,
+          "p90": 0.62,
+          "p99": 1.34,
+          "p99.9": 7.4399999999999995
+        },
+        "THREADED": {
+          "rps": 1489.565,
+          "p50": 13.605,
+          "p90": 19.285,
+          "p99": 29.83,
+          "p99.9": 71.055
+        },
+        "EVENTLOOP_V1": {
+          "rps": 2120.3599999999997,
+          "p50": 9.665,
+          "p90": 15.875,
+          "p99": 30.095000000000002,
+          "p99.9": 78.78999999999999
+        },
+        "EVENTLOOP_V2": {
+          "rps": 2296.25,
+          "p50": 8.870000000000001,
+          "p90": 12.07,
+          "p99": 18.625,
+          "p99.9": 36.16
+        }
+      },
+      {
+        "c": 50,
+        "BLOCKING": {
+          "rps": 1739.145,
+          "p50": 0.425,
+          "p90": 0.745,
+          "p99": 1.615,
+          "p99.9": 7.24
+        },
+        "THREADED": {
+          "rps": 1576.37,
+          "p50": 26.84,
+          "p90": 37.04,
+          "p99": 75.765,
+          "p99.9": 254.755
+        },
+        "EVENTLOOP_V1": {
+          "rps": 2122.475,
+          "p50": 19.05,
+          "p90": 37.355000000000004,
+          "p99": 70.14,
+          "p99.9": 183.82999999999998
+        },
+        "EVENTLOOP_V2": {
+          "rps": 2272.4049999999997,
+          "p50": 18.715,
+          "p90": 24.25,
+          "p99": 40.04,
+          "p99.9": 142.475
+        }
+      },
+      {
+        "c": 100,
+        "BLOCKING": {
+          "rps": 1887.355,
+          "p50": 0.435,
+          "p90": 0.6799999999999999,
+          "p99": 1.625,
+          "p99.9": 6.755
+        },
+        "THREADED": {
+          "rps": 1454.235,
+          "p50": 28.165,
+          "p90": 41.379999999999995,
+          "p99": 69.83500000000001,
+          "p99.9": 231.305
+        },
+        "EVENTLOOP_V1": {
+          "rps": 2035.425,
+          "p50": 34.754999999999995,
+          "p90": 61.91499999999999,
+          "p99": 203.135,
+          "p99.9": 549.35
+        },
+        "EVENTLOOP_V2": {
+          "rps": 1515.005,
+          "p50": 45.08,
+          "p90": 81.22999999999999,
+          "p99": 449.025,
+          "p99.9": 912.27
+        }
+      }
+    ]
+  },
+  "_slow": {
+    "label": "/slow",
+    "rows": [
+      {
+        "c": 10,
+        "BLOCKING": {
+          "rps": 9.78,
+          "p50": 101.36,
+          "p90": 102.025,
+          "p99": 103.45,
+          "p99.9": 103.45
+        },
+        "THREADED": {
+          "rps": 78.16,
+          "p50": 101.64,
+          "p90": 103.465,
+          "p99": 107.035,
+          "p99.9": 110.695
+        },
+        "EVENTLOOP_V1": {
+          "rps": 9.41,
+          "p50": 808.5350000000001,
+          "p90": 1012.925,
+          "p99": 1924.915,
+          "p99.9": 1924.915
+        },
+        "EVENTLOOP_V2": {
+          "rps": 75.07499999999999,
+          "p50": 105.45,
+          "p90": 107.77,
+          "p99": 110.4,
+          "p99.9": 110.905
+        }
+      },
+      {
+        "c": 25,
+        "BLOCKING": {
+          "rps": 9.78,
+          "p50": 101.5,
+          "p90": 102.11,
+          "p99": 102.97,
+          "p99.9": 102.97
+        },
+        "THREADED": {
+          "rps": 232.28,
+          "p50": 101.66,
+          "p90": 104.57499999999999,
+          "p99": 112.695,
+          "p99.9": 120.66499999999999
+        },
+        "EVENTLOOP_V1": {
+          "rps": 8.88,
+          "p50": 1319.755,
+          "p90": 1825.25,
+          "p99": 1926.935,
+          "p99.9": 1926.935
+        },
+        "EVENTLOOP_V2": {
+          "rps": 221.49,
+          "p50": 107.625,
+          "p90": 111.345,
+          "p99": 116.13,
+          "p99.9": 122.535
+        }
+      },
+      {
+        "c": 50,
+        "BLOCKING": {
+          "rps": 9.43,
+          "p50": 101.44999999999999,
+          "p90": 102.14,
+          "p99": 449.84000000000003,
+          "p99.9": 449.84000000000003
+        },
+        "THREADED": {
+          "rps": 451.32,
+          "p50": 101.705,
+          "p90": 106.09,
+          "p99": 120.625,
+          "p99.9": 137.10500000000002
+        },
+        "EVENTLOOP_V1": {
+          "rps": 8.23,
+          "p50": 1416.845,
+          "p90": 1825.465,
+          "p99": 1925.245,
+          "p99.9": 1925.245
+        },
+        "EVENTLOOP_V2": {
+          "rps": 438.825,
+          "p50": 108.055,
+          "p90": 113.275,
+          "p99": 121.305,
+          "p99.9": 128.81
+        }
+      },
+      {
+        "c": 100,
+        "BLOCKING": {
+          "rps": 7.035,
+          "p50": 101.5,
+          "p90": 102.30000000000001,
+          "p99": 102.97,
+          "p99.9": 102.97
+        },
+        "THREADED": {
+          "rps": 473.38,
+          "p50": 101.96000000000001,
+          "p90": 107.685,
+          "p99": 119.87,
+          "p99.9": 137.45
+        },
+        "EVENTLOOP_V1": {
+          "rps": 7.09,
+          "p50": 1217.77,
+          "p90": 1620.2849999999999,
+          "p99": 1769.705,
+          "p99.9": 1769.705
+        },
+        "EVENTLOOP_V2": {
+          "rps": 491.99,
+          "p50": 201.575,
+          "p90": 207.725,
+          "p99": 218.195,
+          "p99.9": 223.2
+        }
+      }
+    ]
+  }
+};
+const SERVERS      = ["BLOCKING", "THREADED", "EVENTLOOP_V1", "EVENTLOOP_V2"];
+const LABELS       = {"BLOCKING": "Blocking", "THREADED": "Threaded", "EVENTLOOP_V1": "Event Loop v1", "EVENTLOOP_V2": "Event Loop v2 (pool)"};
+const COLORS       = {"BLOCKING": "#e05252", "THREADED": "#f0a030", "EVENTLOOP_V1": "#4a9eda", "EVENTLOOP_V2": "#52b788"};
+const METRICS      = [["rps", "Throughput (req/s)", "higher"], ["p50", "p50 (ms)", "lower"], ["p90", "p90 (ms)", "lower"], ["p99", "p99 (ms)", "lower"], ["p99.9", "p99.9 (ms)", "lower"]];
+
+// Legend
+const legendEl = document.getElementById('legend');
+SERVERS.forEach(srv => {
+  const item = document.createElement('div');
+  item.className = 'legend-item';
+  item.innerHTML = `<div class="legend-dot" style="background:${COLORS[srv]}"></div><span>${LABELS[srv]}</span>`;
+  legendEl.appendChild(item);
+});
+
+const nav      = document.getElementById('nav');
+const sections = document.getElementById('sections');
+
+function activateTab(id) {
+  nav.querySelectorAll('button').forEach(b => b.classList.toggle('active', b.dataset.tab === id));
+  sections.querySelectorAll('.section').forEach(s => s.classList.toggle('active', s.id === 'section-' + id));
+}
+
+function makeBtn(label, id, active) {
+  const btn = document.createElement('button');
+  btn.textContent  = label;
+  btn.dataset.tab  = id;
+  if (active) btn.classList.add('active');
+  btn.addEventListener('click', () => activateTab(id));
+  nav.appendChild(btn);
+}
+
+function makeSection(id, active) {
+  const sec = document.createElement('div');
+  sec.className = 'section' + (active ? ' active' : '');
+  sec.id = 'section-' + id;
+  sections.appendChild(sec);
+  return sec;
+}
+
+// ── Summary ──────────────────────────────────────────────────────────────────
+makeBtn('Summary', 'summary', true);
+const sumSec = makeSection('summary', true);
+
+const sumTitle = document.createElement('div');
+sumTitle.className = 'section-title';
+sumTitle.textContent = 'Head-to-head summary — median across all runs';
+sumSec.appendChild(sumTitle);
+
+const sumGrid = document.createElement('div');
+sumGrid.className = 'summary-grid';
+
+Object.entries(SUMMARY).forEach(([rid, { label, rows }]) => {
+  const block = document.createElement('div');
+  block.className = 'route-block';
+
+  const h4 = document.createElement('h4');
+  h4.textContent = 'Route: ' + label;
+  block.appendChild(h4);
+
+  const concurrencies = rows.map(r => r.c);
+
+  METRICS.forEach(([metric, metricLabel, direction]) => {
+    const group = document.createElement('div');
+    group.className = 'metric-group';
+
+    const ml = document.createElement('div');
+    ml.className = 'metric-group-label';
+    ml.textContent = metricLabel;
+    group.appendChild(ml);
+
+    const wrap  = document.createElement('div');
+    wrap.className = 'table-wrap';
+    const table = document.createElement('table');
+
+    // thead: Server | c10 | c25 | ...
+    const thead = document.createElement('thead');
+    const hrow  = document.createElement('tr');
+    const thS   = document.createElement('th'); thS.textContent = 'Server'; hrow.appendChild(thS);
+    concurrencies.forEach(c => {
+      const th = document.createElement('th'); th.textContent = 'c' + c; hrow.appendChild(th);
+    });
+    thead.appendChild(hrow); table.appendChild(thead);
+
+    // best value per concurrency column
+    const bestPerC = concurrencies.map(c => {
+      const row = rows.find(r => r.c === c);
+      const vals = SERVERS.map(s => row?.[s]?.[metric] ?? null).filter(v => v !== null);
+      if (!vals.length) return null;
+      return direction === 'higher' ? Math.max(...vals) : Math.min(...vals);
+    });
+
+    const tbody = document.createElement('tbody');
+    SERVERS.forEach(srv => {
+      const tr = document.createElement('tr');
+      const nameTd = document.createElement('td');
+      nameTd.innerHTML = `<span class="server-dot" style="background:${COLORS[srv]}"></span>${LABELS[srv]}`;
+      tr.appendChild(nameTd);
+
+      concurrencies.forEach((c, ci) => {
+        const row = rows.find(r => r.c === c);
+        const val = row?.[srv]?.[metric] ?? null;
+        const td  = document.createElement('td');
+        if (val == null) {
+          td.textContent = '—';
+        } else {
+          td.textContent = metric === 'rps' ? val.toFixed(0) : val.toFixed(2);
+          if (val === bestPerC[ci]) td.classList.add('winner');
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+
+    table.appendChild(tbody);
+    wrap.appendChild(table);
+    group.appendChild(wrap);
+    block.appendChild(group);
+  });
+
+  sumGrid.appendChild(block);
+});
+sumSec.appendChild(sumGrid);
+
+// ── Chart tabs ───────────────────────────────────────────────────────────────
+Object.entries(ROUTE_GROUPS).forEach(([rid, { label, charts }]) => {
+  makeBtn(label, rid, false);
+  const sec = makeSection(rid, false);
+
+  const title = document.createElement('div');
+  title.className = 'section-title';
+  title.textContent = 'Route: ' + label;
+  sec.appendChild(title);
+
+  const grid = document.createElement('div');
+  grid.className = 'chart-grid';
+
+  charts.forEach(def => {
+    const card   = document.createElement('div');
+    card.className = 'chart-card';
+
+    const h3     = document.createElement('h3');
+    const parts  = def.title.split('—');
+    h3.innerHTML = `<strong>${parts[0].trim()}</strong>${parts[1] ? '— ' + parts[1].trim() : ''}`;
+    card.appendChild(h3);
+
+    const wrap   = document.createElement('div');
+    wrap.className = 'chart-wrap';
+    const canvas = document.createElement('canvas');
+    wrap.appendChild(canvas);
+    card.appendChild(wrap);
+    grid.appendChild(card);
+
+    new Chart(canvas, {
+      type: 'line',
+      data: def.data,
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            labels: {
+              color: '#7a85a0', font: { size: 11 },
+              usePointStyle: true, pointStyleWidth: 14, padding: 16,
+            }
+          },
+          tooltip: {
+            backgroundColor: '#1f2435', borderColor: '#2a3050', borderWidth: 1,
+            titleColor: '#e2e8f0', bodyColor: '#7a85a0',
+          },
+        },
+        scales: {
+          x: {
+            title: { display: true, text: 'Concurrency (connections)', color: '#7a85a0', font: { size: 11 } },
+            grid:  { color: '#2a305060' },
+            ticks: { color: '#7a85a0' },
+          },
+          y: {
+            title: { display: true, text: def.ylabel, color: '#7a85a0', font: { size: 11 } },
+            grid:  { color: '#2a305060' },
+            ticks: { color: '#7a85a0' },
+            beginAtZero: false,
+          },
+        },
+      },
+    });
+  });
+
+  sec.appendChild(grid);
+});
+</script>
+</body>
+</html>

@@ -32,6 +32,8 @@ class HTTPServer:
         self.parsed_requests = {}
         self.keep_alive = {}
         self.last_active = {} # can't settimeout on non-blocking sockets
+        self.last_cleanup = time.time()
+        self.peers = {}
 
         # Initialize listening socket & register it
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -54,6 +56,12 @@ class HTTPServer:
             for key, mask in events:
                 callback = key.data
                 callback(key.fileobj)
+
+            now = time.time()
+            if now - self.last_cleanup > 5.0:
+                self.clean_timeouts()
+                self.last_cleanup = now
+
 
         self.logger.info("[Shutdown] Closing listening socket to reject new traffic...")
         try:
@@ -157,11 +165,12 @@ class HTTPServer:
         try:
             data = conn.recv(self.max_read_chunk)
             if not data:
-                self.logger.info("Connection closed by peer %s", conn.getpeername())
+                peer = self.peers.get(conn, '<unknown>')
+                self.logger.info("Connection closed by peer %s", peer)
                 self.close(conn)
                 return
             self.client_buffers[conn] += data
-        except BlockingIOError:
+        except (BlockingIOError, ConnectionResetError):
             return
         
         request = self.try_process(conn)
@@ -171,6 +180,9 @@ class HTTPServer:
 
 
     def handle_write(self, conn):
+        if conn not in self.responses:
+            return
+
         self.last_active[conn] = time.time()
 
         while self.responses[conn] != b'':

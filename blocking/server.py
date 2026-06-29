@@ -86,7 +86,10 @@ class HTTPServer:
     # Helper function to parse HTTP requests 
     def parse_request(self, conn, connection_buffer):
         while b"\r\n\r\n" not in connection_buffer:
-            chunk = conn.recv(self.max_read_chunk)
+            try:
+                chunk = conn.recv(self.max_read_chunk)
+            except ConnectionResetError:
+                return None
             if not chunk: 
                 return None  # client closed connection 
             connection_buffer += chunk
