@@ -38,93 +38,104 @@ class HTTPServer:
         self.logger.info("Started request handler for connection %s", peer)
         connection_buffer = b""
         conn.settimeout(self.timeout_seconds)
-        while True:
-        # Parse the HTTP request
-            try:
-                result = self.parse_request(conn, connection_buffer)
-            except socket.timeout:
-                self.logger.warning("Connection timed out for %s", peer)
-                break
-            if not result:
-                break
-        
-            request, connection_buffer = result
+        try:
+            while True:
+                try:
+                    result = self.parse_request(conn, connection_buffer)
+                except socket.timeout:
+                    self.logger.warning("Connection timed out for %s", peer)
+                    break
+                if not result:
+                    break
 
-            # keep-alive by default
-            conn_header = request.headers.get('connection', '').lower()
-            keep_alive = (conn_header != 'close')
+                request, connection_buffer = result
+                conn_header = request.headers.get('connection', '').lower()
+                keep_alive = (conn_header != 'close')
 
-            response_status = []
-            response_headers = []
+                response_status = []
+                response_headers = []
 
-            def start_response(status, headers, exc_info=None):
-                response_status.append(status)
-                response_headers.extend(headers)
+                def start_response(status, headers, exc_info=None):
+                    response_status.append(status)
+                    response_headers.extend(headers)
 
-            self.logger.info("Handling request %s %s from %s", request.method, request.path, peer)
-            # Build the WSGI environ
-            environ = self.build_environ(request)
+                self.logger.info("Handling request %s %s from %s", request.method, request.path, peer)
+                environ = self.build_environ(request)
 
-            try:
-                # Call the WSGI application 
-                wsgi_result = self.app(environ, start_response)
-            except Exception as e:
-                self.logger.exception("Internal Server Error")
-                response_status = ['500 INTERNAL SERVER ERROR']
-                response_headers = [('Content-Type', 'text/plain')]
-                wsgi_result = [b'Internal Server Error: The application crashed.'] 
-            response = self.finish_response(wsgi_result, response_status, response_headers, keep_alive)
-            self.logger.info("Sending response %s for %s (%d bytes), keep_alive=%s", response_status[0], peer, len(response), keep_alive)
-            conn.sendall(response)
-            if not keep_alive:
-                self.logger.info("Closing connection %s because client requested close", peer)
-                self.peers.pop(conn, None)
-                conn.close()
-                return 
-        self.logger.info("Closing connection %s", peer)
-        self.peers.pop(conn, None)
-        conn.close()
+                try:
+                    wsgi_result = self.app(environ, start_response)
+                except Exception:
+                    self.logger.exception("Internal Server Error")
+                    response_status = ['500 INTERNAL SERVER ERROR']
+                    response_headers = [('Content-Type', 'text/plain')]
+                    wsgi_result = [b'Internal Server Error: The application crashed.']
 
+                response = self.finish_response(wsgi_result, response_status, response_headers, keep_alive)
+                self.logger.info("Sending response %s for %s (%d bytes), keep_alive=%s", response_status[0], peer, len(response), keep_alive)
+                conn.sendall(response)
+                if not keep_alive:
+                    self.logger.info("Closing connection %s because client requested close", peer)
+                    return
+        finally:
+            self.logger.info("Closing connection %s", peer)
+            self.peers.pop(conn, None)
+            conn.close()
+            
     # Helper function to parse HTTP requests
     def parse_request(self, conn, connection_buffer):
+        peer = self.peers.get(conn, '<unknown>')
         while b"\r\n\r\n" not in connection_buffer:
-            chunk = conn.recv(self.max_read_chunk)
-            if not chunk: 
-                return None  # client closed connection 
+            try:
+                chunk = conn.recv(self.max_read_chunk)
+            except (ConnectionResetError, OSError):
+                return None
+            if not chunk:
+                return None  # client closed connection
             connection_buffer += chunk
-        
+
         parts = connection_buffer.split(b"\r\n\r\n", 1)
-        raw_headers = parts[0].decode('utf-8')
+        try:
+            raw_headers = parts[0].decode('utf-8')
+        except UnicodeDecodeError:
+            self.logger.warning("Non-UTF-8 headers from %s", peer)
+            return None
         body_bytes = parts[1] if len(parts) > 1 else b""
-        
+
         lines = raw_headers.splitlines()
         if not lines or not lines[0]:
             return None
-            
-        method, path, _ = lines[0].split(' ')
         
+        try:
+            method, path, _ = lines[0].split(' ')
+        except ValueError:
+            self.logger.warning("Malformed request line from %s: %s", peer, lines[0])
+            return None        
+
         headers_dict = {}
         for line in lines[1:]:
             if ":" in line:
                 key, value = line.split(":", 1)
                 headers_dict[key.strip().lower()] = value.strip()
 
-        content_length = int(headers_dict.get('content-length', 0))    
-        
+        content_length = int(headers_dict.get('content-length', 0))
+
         # Keep fetching data until body is done
         while len(body_bytes) < content_length:
             remaining_length = content_length - len(body_bytes)
-            chunk = conn.recv(min(remaining_length, 4096))
+            try:
+                chunk = conn.recv(min(remaining_length, 4096))
+            except (ConnectionResetError, OSError):
+                return None
             if not chunk:
                 return None
             body_bytes += chunk
 
         # Slice off to match content_length
         actual_body = body_bytes[:content_length]
-        
+
         # keep leftover data (in case of 2 requests in a row)
         leftover_buffer = body_bytes[content_length:]
-        
+
         request = HTTPRequest(method, path, headers_dict, actual_body)
         return request, leftover_buffer
 
@@ -198,6 +209,8 @@ if __name__ == "__main__":
     parser.add_argument("app_path", help="WSGI app in the form module:callable or apps.<name> if no module prefix is provided")
     parser.add_argument("--port", type=int, default=config["port"],
                         help=f"Port to bind. Defaults to config.json value {config['port']}")
+    parser.add_argument("--timeout", type=float, default=config["timeout_seconds"],
+                help=f"Connection timeout in seconds. Defaults to config.json value {config['timeout_seconds']}")
     args = parser.parse_args()
 
     app_path = args.app_path
@@ -214,7 +227,7 @@ if __name__ == "__main__":
     server = HTTPServer(
         config["host"], 
         args.port, 
-        config["timeout_seconds"], 
+        args.timeout, 
         config["max_read_chunk"], 
         app=wsgi_callable
     )

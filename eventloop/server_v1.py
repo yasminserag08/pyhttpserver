@@ -90,7 +90,6 @@ class HTTPServer:
         
     def clean_timeouts(self):
         now = time.time()
-        now = time.time()
         timed_out_connections = []
 
         for conn, last_seen in self.last_active.items():
@@ -104,11 +103,12 @@ class HTTPServer:
 
     def accept_connection(self, sock):
         conn, addr = sock.accept()
-        self.logger.info(f"Accepted connection from {addr}")
+        self.logger.info("Accepted connection from %s", addr)
         conn.setblocking(False)
-        self.client_buffers[conn] = b'' # initialize buffer
+        self.client_buffers[conn] = b''
         self.parsed_requests[conn] = None
         self.last_active[conn] = time.time()
+        self.peers[conn] = addr
         self.sel.register(conn, selectors.EVENT_READ, self.handle_read)
 
     def try_process(self, conn):
@@ -116,8 +116,12 @@ class HTTPServer:
 
         if self.parsed_requests[conn] is None:
             if b"\r\n\r\n" not in client_buffer:
-                return None # need to recv more data to complete the headers
-            headers, method, path = self.parse_request(client_buffer)
+                return None
+            try:
+                headers, method, path = self.parse_request(client_buffer)
+            except (ValueError, UnicodeDecodeError) as e:
+                self.logger.warning("Malformed request from %s: %s", self.peers.get(conn, '<unknown>'), e)
+                return 'BAD_REQUEST'
             header_end = client_buffer.index(b"\r\n\r\n") + 4
             self.parsed_requests[conn] = (headers, method, path, header_end)
 
@@ -126,16 +130,16 @@ class HTTPServer:
         body = client_buffer[header_end:]
 
         if content_length > len(body):
-            return None # need to recv more data to complete the body
+            return None
 
         body = body[:content_length]
         self.client_buffers[conn] = client_buffer[header_end + content_length:]
         self.parsed_requests[conn] = None
         return HTTPRequest(method, path, headers, body)
-
     # Handles everything related to WSGI
     def dispatch(self, conn, request):
-        self.logger.info("Dispatching request %s %s from %s", request.method, request.path, conn.getpeername())
+        peer = self.peers.get(conn, '<unknown>')
+        self.logger.info("Dispatching request %s %s from %s", request.method, request.path, peer)
         environ = self.build_environ(request)
         response_status = []
         response_headers = []
@@ -153,7 +157,7 @@ class HTTPServer:
             result = [b'Internal Server Error: The application crashed.']
 
         self.responses[conn] = self.finish_response(result, response_status, response_headers)
-        self.logger.info("Prepared response %s for %s (%d bytes)", response_status[0], conn.getpeername(), len(self.responses[conn]))
+        self.logger.info("Prepared response %s for %s (%d bytes)", response_status[0], peer, len(self.responses[conn]))
 
         keep_alive = request.headers.get('connection')
         self.keep_alive[conn] = (keep_alive is None or keep_alive == 'keep-alive')
@@ -170,11 +174,15 @@ class HTTPServer:
                 self.close(conn)
                 return
             self.client_buffers[conn] += data
-        except (BlockingIOError, ConnectionResetError):
+        except (BlockingIOError, ConnectionResetError, OSError):
+            self.close(conn)
             return
         
         request = self.try_process(conn)
         if request is None:
+            return
+        if request == 'BAD_REQUEST':
+            self.send_400(conn)
             return
         self.dispatch(conn, request)
 
@@ -193,13 +201,16 @@ class HTTPServer:
                 return
 
         if not self.keep_alive[conn]:
-            self.logger.info("Closing connection %s after response", conn.getpeername())
+            peer = self.peers.get(conn, '<unknown>')
+            self.logger.info("Closing connection %s after response", peer)
             self.close(conn)
         else:
             self.sel.modify(conn, selectors.EVENT_READ, self.handle_read)
-
-            request = self.try_process(conn)                        
+            request = self.try_process(conn)
             if request is None:
+                return
+            if request == 'BAD_REQUEST':
+                self.send_400(conn)
                 return
             self.dispatch(conn, request)
 
@@ -272,6 +283,7 @@ class HTTPServer:
         self.client_buffers.pop(conn, None)
         self.parsed_requests.pop(conn, None)
         self.last_active.pop(conn, None)
+        self.peers.pop(conn, None)
         self.keep_alive.pop(conn, None)
         try:
             peer = conn.getpeername()
@@ -282,6 +294,22 @@ class HTTPServer:
             conn.close()
         except OSError: 
             pass # Already closed at the OS level
+
+        def send_400(self, conn):
+            body = b'Bad Request: malformed HTTP request.'
+            response = (
+                b'HTTP/1.1 400 Bad Request\r\n'
+                b'Content-Type: text/plain\r\n'
+                b'Connection: close\r\n'
+                + f'Content-Length: {len(body)}\r\n'.encode()
+                + b'\r\n'
+                + body
+            )
+            try:
+                conn.sendall(response)
+            except OSError:
+                pass
+            self.close(conn)
 
 
 if __name__ == "__main__":
@@ -304,6 +332,8 @@ if __name__ == "__main__":
     parser.add_argument("app_path", help="WSGI app in the form module:callable or apps.<name> if no module prefix is provided")
     parser.add_argument("--port", type=int, default=config["port"],
                         help=f"Port to bind. Defaults to config.json value {config['port']}")
+    parser.add_argument("--timeout", type=float, default=config["timeout_seconds"],
+                help=f"Connection timeout in seconds. Defaults to config.json value {config['timeout_seconds']}")
     args = parser.parse_args()
 
     app_path = args.app_path
@@ -320,7 +350,7 @@ if __name__ == "__main__":
     server = HTTPServer(
         config["host"], 
         args.port, 
-        config["timeout_seconds"], 
+        args.timeout, 
         config["max_read_chunk"], 
         app=wsgi_callable
     )

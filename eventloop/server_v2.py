@@ -39,6 +39,7 @@ class HTTPServer:
         
         self.pool = ThreadPoolExecutor(max_workers=50) # for blocking tasks like calling app
         self.response_queue = queue.Queue()
+        self.in_flight = set() # connections currently being processed by the thread pool
         
         # Initialize listening socket & register it
         self.listen_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -99,12 +100,15 @@ class HTTPServer:
         while not self.response_queue.empty():
             conn, response_bytes = self.response_queue.get()
             if conn not in self.client_buffers:
-                continue  # connection was closed before response was ready
+                continue  
+            self.in_flight.discard(conn)
             self.responses[conn] = response_bytes
-            self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write) 
+            try:
+                self.sel.modify(conn, selectors.EVENT_WRITE, self.handle_write)
+            except KeyError:
+                self.responses.pop(conn, None)  
 
     def clean_timeouts(self):
-        now = time.time()
         now = time.time()
         timed_out_connections = []
 
@@ -149,8 +153,12 @@ class HTTPServer:
 
         if self.parsed_requests[conn] is None:
             if b"\r\n\r\n" not in client_buffer:
-                return None # need to recv more data to complete the headers
-            headers, method, path = self.parse_request(client_buffer)
+                return None
+            try:
+                headers, method, path = self.parse_request(client_buffer)
+            except (ValueError, UnicodeDecodeError) as e:
+                self.logger.warning("Malformed request from %s: %s", self.peers.get(conn, '<unknown>'), e)
+                return 'BAD_REQUEST'
             header_end = client_buffer.index(b"\r\n\r\n") + 4
             self.parsed_requests[conn] = (headers, method, path, header_end)
 
@@ -159,23 +167,22 @@ class HTTPServer:
         body = client_buffer[header_end:]
 
         if content_length > len(body):
-            return None # need to recv more data to complete the body
+            return None
 
         body = body[:content_length]
         self.client_buffers[conn] = client_buffer[header_end + content_length:]
         self.parsed_requests[conn] = None
         return HTTPRequest(method, path, headers, body)
-
     def dispatch(self, conn, request):
         peer = self.peers.get(conn, '<unknown>')
         self.logger.info("Dispatching request %s %s from %s", request.method, request.path, peer)
         environ = self.build_environ(request)
-        
+
         keep_alive = request.headers.get('connection')
         self.keep_alive[conn] = (keep_alive is None or keep_alive == 'keep-alive')
 
+        self.in_flight.add(conn)
         self.pool.submit(self.run_app, environ, conn)
-
 
     def handle_read(self, conn):
         peer = self.peers.get(conn, '<unknown>')
@@ -190,12 +197,17 @@ class HTTPServer:
         except (BlockingIOError, OSError, ConnectionResetError):
             self.close(conn)
             return
-        
+
+        if conn in self.in_flight:
+            return  # data is buffered, will be picked up after current request finishes
+
         request = self.try_process(conn)
         if request is None:
             return
+        if request == 'BAD_REQUEST':
+            self.send_400(conn)
+            return
         self.dispatch(conn, request)
-
 
     def handle_write(self, conn):
         if conn not in self.responses:
@@ -217,10 +229,14 @@ class HTTPServer:
         else:
             self.sel.modify(conn, selectors.EVENT_READ, self.handle_read)
 
-            request = self.try_process(conn)                        
-            if request is None:
-                return
-            self.dispatch(conn, request)
+            if conn not in self.in_flight:
+                request = self.try_process(conn)
+                if request is None:
+                    return
+                if request == 'BAD_REQUEST':
+                    self.send_400(conn)
+                    return
+                self.dispatch(conn, request)
 
     # Helper method to parse HTTP requests
     def parse_request(self, buf):
@@ -256,7 +272,7 @@ class HTTPServer:
             'SERVER_PROTOCOL': 'HTTP/1.1',
             'wsgi.input': io.BytesIO(request.body_bytes),
             'wsgi.errors': sys.stderr,
-            'wsgi.multithread': False,
+            'wsgi.multithread': True,
             'wsgi.multiprocess': False,
             'wsgi.run_once': False,
             'wsgi.url_scheme': 'http',
@@ -286,7 +302,8 @@ class HTTPServer:
         try:
             self.sel.unregister(conn)
         except KeyError:
-            pass # Already unregistered
+            pass
+        self.in_flight.discard(conn)
         self.responses.pop(conn, None)
         self.client_buffers.pop(conn, None)
         self.parsed_requests.pop(conn, None)
@@ -298,11 +315,25 @@ class HTTPServer:
             peer = None
         self.logger.info("Closed connection %s", peer or conn)
         try:
-            self.logger.info("Closing connection %s", peer)
             conn.close()
-        except OSError: 
-            pass # Already closed at the OS level
+        except OSError:
+            pass
 
+    def send_400(self, conn):
+        body = b'Bad Request: malformed HTTP request.'
+        response = (
+            b'HTTP/1.1 400 Bad Request\r\n'
+            b'Content-Type: text/plain\r\n'
+            b'Connection: close\r\n'
+            + f'Content-Length: {len(body)}\r\n'.encode()
+            + b'\r\n'
+            + body
+        )
+        try:
+            conn.sendall(response)
+        except OSError:
+            pass
+        self.close(conn)
 
 if __name__ == "__main__":
     current_dir = os.path.dirname(os.path.abspath(__file__))
@@ -319,11 +350,13 @@ if __name__ == "__main__":
     config = load_server_config()
 
     parser = argparse.ArgumentParser(
-        description="Start the event-loop v1 WSGI server."
+        description="Start the event-loop v2 WSGI server."
     )
     parser.add_argument("app_path", help="WSGI app in the form module:callable or apps.<name> if no module prefix is provided")
     parser.add_argument("--port", type=int, default=config["port"],
                         help=f"Port to bind. Defaults to config.json value {config['port']}")
+    parser.add_argument("--timeout", type=float, default=config["timeout_seconds"],
+                    help=f"Connection timeout in seconds. Defaults to config.json value {config['timeout_seconds']}")
     args = parser.parse_args()
 
     app_path = args.app_path
@@ -340,7 +373,7 @@ if __name__ == "__main__":
     server = HTTPServer(
         config["host"], 
         args.port, 
-        config["timeout_seconds"], 
+        args.timeout, 
         config["max_read_chunk"], 
         app=wsgi_callable
     )

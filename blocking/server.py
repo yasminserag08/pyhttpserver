@@ -85,6 +85,7 @@ class HTTPServer:
 
     # Helper function to parse HTTP requests 
     def parse_request(self, conn, connection_buffer):
+        peer = self.peers.get(conn, '<unknown>')
         while b"\r\n\r\n" not in connection_buffer:
             try:
                 chunk = conn.recv(self.max_read_chunk)
@@ -95,14 +96,22 @@ class HTTPServer:
             connection_buffer += chunk
         
         parts = connection_buffer.split(b"\r\n\r\n", 1)
-        raw_headers = parts[0].decode('utf-8')
+        try:
+            raw_headers = parts[0].decode('utf-8')
+        except UnicodeDecodeError:
+            self.logger.warning("Non-UTF-8 headers from %s", peer)
+            return None
         body_bytes = parts[1] if len(parts) > 1 else b""
         
         lines = raw_headers.splitlines()
         if not lines or not lines[0]:
             return None
             
-        method, path, _ = lines[0].split(' ')
+        try:
+            method, path, _ = lines[0].split(' ')
+        except ValueError:
+            self.logger.warning("Malformed request line from %s: %s", peer, lines[0])
+            return None        
         
         headers_dict = {}
         for line in lines[1:]:
@@ -198,6 +207,8 @@ if __name__ == "__main__":
     parser.add_argument("app_path", help="WSGI app in the form module:callable or apps.<name> if no module prefix is provided")
     parser.add_argument("--port", type=int, default=config["port"],
                         help=f"Port to bind. Defaults to config.json value {config['port']}")
+    parser.add_argument("--timeout", type=float, default=config["timeout_seconds"],
+                help=f"Connection timeout in seconds. Defaults to config.json value {config['timeout_seconds']}")
     args = parser.parse_args()
 
     app_path = args.app_path
@@ -214,7 +225,7 @@ if __name__ == "__main__":
     server = HTTPServer(
         config["host"], 
         args.port, 
-        config["timeout_seconds"], 
+        args.timeout, 
         config["max_read_chunk"], 
         app=wsgi_callable
     )
